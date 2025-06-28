@@ -1,0 +1,20 @@
+# JetBrains
+.idea/
+
+# Nix
+.direnv/
+
+# Rust
+target/
+
+# LLMs
+repomix-output.txt
+/sgoinfre/
+/test-packages/
+/test_home/
+/test_script.sh
+
+
+# Added by cargo
+
+/target
