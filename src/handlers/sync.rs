@@ -1,6 +1,8 @@
 use crate::config::ConfigManager;
 use crate::usb::UsbManager;
 use anyhow::Result;
+use console::{Term, style};
+use dialoguer::Select;
 use std::process;
 
 pub async fn handle_sync(
@@ -12,17 +14,27 @@ pub async fn handle_sync(
     download_missing: bool,
     verbose: bool,
 ) -> Result<()> {
-    println!("🔄 Syncing with USB device...");
+    let term = Term::stdout();
+    term.write_line(&format!(
+        "{} Syncing with USB device...",
+        style("🔄").cyan()
+    ))?;
 
     // Scan for Ventoy devices
     let ventoy_devices = usb_manager.find_ventoy_devices().await?;
 
     if ventoy_devices.is_empty() {
-        eprintln!("❌ No Ventoy devices found.");
-        eprintln!("💡 Please ensure:");
-        eprintln!("   • USB device is connected");
-        eprintln!("   • Device has Ventoy installed");
-        eprintln!("   • Device is mounted and accessible");
+        term.write_line(&format!("{} No Ventoy devices found.", style("❌").red()))?;
+        term.write_line(&format!("{} Please ensure:", style("💡").yellow()))?;
+        term.write_line(&format!("   {} USB device is connected", style("•").dim()))?;
+        term.write_line(&format!(
+            "   {} Device has Ventoy installed",
+            style("•").dim()
+        ))?;
+        term.write_line(&format!(
+            "   {} Device is mounted and accessible",
+            style("•").dim()
+        ))?;
         process::exit(1);
     }
 
@@ -30,42 +42,44 @@ pub async fn handle_sync(
     let selected_device = if ventoy_devices.len() == 1 || auto_select {
         &ventoy_devices[0]
     } else {
-        println!("🔌 Multiple Ventoy devices found:");
-        for (i, device) in ventoy_devices.iter().enumerate() {
-            println!(
-                "  {}. {} ({})",
-                i + 1,
-                device.device_path.display(),
-                device.label.as_deref().unwrap_or("unlabeled")
-            );
-        }
+        term.write_line(&format!(
+            "{} Multiple Ventoy devices found:",
+            style("🔌").cyan()
+        ))?;
 
-        print!("❓ Select device [1-{}]: ", ventoy_devices.len());
-        std::io::Write::flush(&mut std::io::stdout()).ok();
+        let device_options: Vec<String> = ventoy_devices
+            .iter()
+            .map(|device| {
+                format!(
+                    "{} ({})",
+                    device.device_path.display(),
+                    device.label.as_deref().unwrap_or("unlabeled")
+                )
+            })
+            .collect();
 
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
+        let selection = Select::new()
+            .with_prompt("Select device")
+            .items(&device_options)
+            .default(0)
+            .interact()?;
 
-        let selection: usize = input
-            .trim()
-            .parse()
-            .map_err(|_| anyhow::anyhow!("Invalid selection"))?;
-
-        if selection == 0 || selection > ventoy_devices.len() {
-            anyhow::bail!("Selection out of range");
-        }
-
-        &ventoy_devices[selection - 1]
+        &ventoy_devices[selection]
     };
 
-    println!(
-        "✅ Selected device: {} ({})",
-        selected_device.device_path.display(),
+    term.write_line(&format!(
+        "{} Selected device: {} ({})",
+        style("✅").green(),
+        style(selected_device.device_path.display()).cyan(),
         selected_device.label.as_deref().unwrap_or("unlabeled")
-    );
+    ))?;
 
     if let Some(version) = &selected_device.ventoy_version {
-        println!("📦 Ventoy version: {}", version);
+        term.write_line(&format!(
+            "{} Ventoy version: {}",
+            style("📦").cyan(),
+            style(version).green()
+        ))?;
     }
 
     // Validate and select the device
@@ -76,7 +90,11 @@ pub async fn handle_sync(
     // Create metadata directory
     let metadata_dir = usb_manager.create_isod_metadata_dir().await?;
     if verbose {
-        println!("📁 Metadata directory: {:?}", metadata_dir);
+        term.write_line(&format!(
+            "{} Metadata directory: {:?}",
+            style("📁").cyan(),
+            metadata_dir
+        ))?;
     }
 
     // Show space info
@@ -84,28 +102,37 @@ pub async fn handle_sync(
     let total_space = selected_device.total_space;
     let used_space = total_space - available_space;
 
-    println!("💾 Storage info:");
-    println!(
-        "   Total: {:.1} GB",
+    term.write_line(&format!("{} Storage info:", style("💾").cyan()))?;
+    term.write_line(&format!(
+        "   {}: {:.1} GB",
+        style("Total").dim(),
         total_space as f64 / (1024.0 * 1024.0 * 1024.0)
-    );
-    println!(
-        "   Used: {:.1} GB",
+    ))?;
+    term.write_line(&format!(
+        "   {}: {:.1} GB",
+        style("Used").dim(),
         used_space as f64 / (1024.0 * 1024.0 * 1024.0)
-    );
-    println!(
-        "   Available: {:.1} GB",
+    ))?;
+    term.write_line(&format!(
+        "   {}: {:.1} GB",
+        style("Available").dim(),
         available_space as f64 / (1024.0 * 1024.0 * 1024.0)
-    );
+    ))?;
 
     if verify_checksums {
-        println!("🔍 TODO: Implement checksum verification");
+        term.write_line(&format!(
+            "{} TODO: Implement checksum verification",
+            style("🔍").yellow()
+        ))?;
     }
 
     if download_missing {
-        println!("⬇️  TODO: Implement missing ISO download");
+        term.write_line(&format!(
+            "{} TODO: Implement missing ISO download",
+            style("⬇️").yellow()
+        ))?;
     }
 
-    println!("✅ USB sync complete");
+    term.write_line(&format!("{} USB sync complete", style("✅").green()))?;
     Ok(())
 }

@@ -1,6 +1,9 @@
 use crate::registry::IsoRegistry;
 use anyhow::Result;
+use console::{Term, style};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::process;
+use std::time::Duration;
 
 pub async fn handle_info(
     iso_registry: &IsoRegistry,
@@ -10,105 +13,191 @@ pub async fn handle_info(
     show_details: bool,
     verbose: bool,
 ) -> Result<()> {
-    println!("ℹ️  Information for: {}", distro);
+    let term = Term::stdout();
+    term.write_line(&format!(
+        "{} Information for: {}",
+        style("ℹ️").cyan(),
+        style(&distro).cyan().bold()
+    ))?;
 
     if !iso_registry.is_supported(&distro) {
-        eprintln!("❌ Distribution '{}' is not supported", distro);
-        eprintln!(
-            "💡 Use 'isod search {}' to find similar distributions",
+        term.write_line(&format!(
+            "{} Distribution '{}' is not supported",
+            style("❌").red(),
             distro
-        );
+        ))?;
+        term.write_line(&format!(
+            "{} Use 'isod search {}' to find similar distributions",
+            style("💡").yellow(),
+            distro
+        ))?;
         process::exit(1);
     }
 
     let definition = iso_registry.get_distro(&distro).unwrap();
 
-    println!("\n📦 {} - {}", distro, definition.display_name);
-    println!("📝 Description: {}", definition.description);
-    println!("🌐 Homepage: {}", definition.homepage);
+    term.write_line(&format!(
+        "\n{} {} - {}",
+        style("📦").green(),
+        style(&distro).cyan().bold(),
+        style(&definition.display_name).green()
+    ))?;
+    term.write_line(&format!(
+        "{} Description: {}",
+        style("📝").cyan(),
+        definition.description
+    ))?;
+    term.write_line(&format!(
+        "{} Homepage: {}",
+        style("🌐").cyan(),
+        style(&definition.homepage).cyan()
+    ))?;
 
     if show_details || verbose {
-        println!("\n🏗️  Supported architectures:");
+        term.write_line(&format!(
+            "\n{} Supported architectures:",
+            style("🏗️").cyan()
+        ))?;
         for arch in &definition.supported_architectures {
-            println!("   • {}", arch);
+            term.write_line(&format!("   {} {}", style("•").dim(), arch))?;
         }
 
-        println!("\n📦 Supported variants:");
+        term.write_line(&format!("\n{} Supported variants:", style("📦").cyan()))?;
         for variant in &definition.supported_variants {
-            println!("   • {}", variant);
+            term.write_line(&format!("   {} {}", style("•").dim(), variant))?;
         }
 
         if let Some(default_variant) = &definition.default_variant {
-            println!("   Default: {}", default_variant);
+            term.write_line(&format!(
+                "   {}: {}",
+                style("Default").green(),
+                default_variant
+            ))?;
         }
 
-        println!("\n📁 Filename pattern: {}", definition.filename_pattern);
+        term.write_line(&format!(
+            "\n{} Filename pattern: {}",
+            style("📁").cyan(),
+            style(&definition.filename_pattern).dim()
+        ))?;
     }
 
     if show_versions || verbose {
-        println!("\n🔍 Checking available versions...");
+        term.write_line(&format!(
+            "\n{} Checking available versions...",
+            style("🔍").cyan()
+        ))?;
+
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.blue} Fetching version information...")
+                .unwrap(),
+        );
+        spinner.enable_steady_tick(Duration::from_millis(100));
+
         match iso_registry.get_available_versions(&distro).await {
             Ok(versions) => {
+                spinner.finish_and_clear();
+
                 if versions.is_empty() {
-                    println!("❌ No versions found");
+                    term.write_line(&format!("{} No versions found", style("❌").red()))?;
                 } else {
-                    println!("📋 Available versions:");
+                    term.write_line(&format!("{} Available versions:", style("📋").cyan()))?;
                     let mut sorted_versions = versions;
                     sorted_versions.sort_by(|a, b| b.cmp(a));
 
                     for (i, version) in sorted_versions.iter().enumerate() {
                         if !verbose && i >= 5 {
-                            println!(
-                                "   ... and {} more (use --verbose to see all)",
-                                sorted_versions.len() - 5
-                            );
+                            term.write_line(&format!(
+                                "   {} and {} more (use --verbose to see all)",
+                                style("...").dim(),
+                                style(sorted_versions.len() - 5).green()
+                            ))?;
                             break;
                         }
 
-                        println!("   • {} ({})", version.version, version.release_type);
+                        term.write_line(&format!(
+                            "   {} {} ({})",
+                            style("•").dim(),
+                            style(&version.version).green(),
+                            style(&version.release_type).blue()
+                        ))?;
+
                         if let Some(date) = &version.release_date {
-                            println!("     📅 Released: {}", date);
+                            term.write_line(&format!(
+                                "     {} Released: {}",
+                                style("📅").dim(),
+                                date
+                            ))?;
                         }
                         if let Some(notes) = &version.notes {
-                            println!("     📝 {}", notes);
+                            term.write_line(&format!("     {} {}", style("📝").dim(), notes))?;
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("❌ Failed to fetch versions: {}", e);
+                spinner.finish_and_clear();
+                term.write_line(&format!(
+                    "{} Failed to fetch versions: {}",
+                    style("❌").red(),
+                    e
+                ))?;
             }
         }
     }
 
     if show_sources || verbose {
-        println!("\n🌐 Download sources:");
+        term.write_line(&format!("\n{} Download sources:", style("🌐").cyan()))?;
         for (i, source) in definition.download_sources.iter().enumerate() {
-            println!("   {}. {} ({})", i + 1, source.source_type, source.priority);
+            term.write_line(&format!(
+                "   {}. {} ({})",
+                style(i + 1).dim(),
+                style(&source.source_type).cyan(),
+                style(&source.priority).green()
+            ))?;
+
             if let Some(url) = &source.url {
-                println!("      🔗 {}", url);
+                term.write_line(&format!("      {} {}", style("🔗").dim(), style(url).dim()))?;
             }
             if let Some(desc) = &source.description {
-                println!("      📝 {}", desc);
+                term.write_line(&format!("      {} {}", style("📝").dim(), desc))?;
             }
             if let Some(region) = &source.region {
-                println!("      🌍 Region: {}", region);
+                term.write_line(&format!("      {} Region: {}", style("🌍").dim(), region))?;
             }
             if source.verified {
-                println!("      ✅ Verified");
+                term.write_line(&format!("      {}", style("✅ Verified").green()))?;
             }
         }
     }
 
-    println!("\n💡 Example commands:");
-    println!("   isod add {}", distro);
+    term.write_line(&format!("\n{} Example commands:", style("💡").yellow()))?;
+    term.write_line(&format!(
+        "   {}",
+        style(&format!("isod add {}", distro)).cyan()
+    ))?;
     if let Some(default_variant) = &definition.default_variant {
-        println!("   isod add {} --variant {}", distro, default_variant);
+        term.write_line(&format!(
+            "   {}",
+            style(&format!(
+                "isod add {} --variant {}",
+                distro, default_variant
+            ))
+            .cyan()
+        ))?;
     }
     if let Some(arch) = definition.supported_architectures.first() {
-        println!("   isod add {} --arch {}", distro, arch);
+        term.write_line(&format!(
+            "   {}",
+            style(&format!("isod add {} --arch {}", distro, arch)).cyan()
+        ))?;
     }
-    println!("   isod download {}", distro);
+    term.write_line(&format!(
+        "   {}",
+        style(&format!("isod download {}", distro)).cyan()
+    ))?;
 
     Ok(())
 }

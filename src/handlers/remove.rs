@@ -1,6 +1,8 @@
 use crate::config::ConfigManager;
 use crate::usb::UsbManager;
 use anyhow::Result;
+use console::{Term, style};
+use dialoguer::Confirm;
 use std::process;
 
 pub async fn handle_remove(
@@ -12,49 +14,62 @@ pub async fn handle_remove(
     all: bool,
     skip_confirmation: bool,
 ) -> Result<()> {
-    println!("🗑️  Removing {} from USB...", distro);
+    let term = Term::stdout();
+    term.write_line(&format!(
+        "{} Removing {} from USB...",
+        style("🗑️").cyan(),
+        style(&distro).cyan()
+    ))?;
 
     // Find current USB device
     let current_device = usb_manager.get_current_device().await;
     if current_device.is_none() {
-        eprintln!("❌ No USB device selected.");
-        eprintln!("💡 Use 'isod sync' to select a device first");
+        term.write_line(&format!("{} No USB device selected.", style("❌").red()))?;
+        term.write_line(&format!(
+            "{} Use 'isod sync' to select a device first",
+            style("💡").yellow()
+        ))?;
         process::exit(1);
     }
 
     // Build removal criteria
-    let mut criteria = vec![format!("Distribution: {}", distro)];
+    let mut criteria = vec![format!("Distribution: {}", style(&distro).cyan())];
     if let Some(ref v) = variant {
-        criteria.push(format!("Variant: {}", v));
+        criteria.push(format!("Variant: {}", style(v).cyan()));
     }
     if let Some(ref ver) = version {
-        criteria.push(format!("Version: {}", ver));
+        criteria.push(format!("Version: {}", style(ver).cyan()));
     }
     if all {
-        criteria.push("Scope: All versions".to_string());
+        criteria.push(format!("Scope: {}", style("All versions").yellow()));
     }
 
-    println!("🎯 Removal criteria:");
+    term.write_line(&format!("{} Removal criteria:", style("🎯").cyan()))?;
     for criterion in &criteria {
-        println!("   • {}", criterion);
+        term.write_line(&format!("   {} {}", style("•").dim(), criterion))?;
     }
 
     // Confirmation prompt
     if !skip_confirmation {
-        print!("\n❓ Are you sure you want to remove these ISOs? [y/N]: ");
-        std::io::Write::flush(&mut std::io::stdout()).ok();
+        term.write_line("")?;
+        let confirmed = Confirm::new()
+            .with_prompt("Are you sure you want to remove these ISOs?")
+            .default(false)
+            .interact()?;
 
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-
-        if !input.trim().to_lowercase().starts_with('y') {
-            println!("❌ Operation cancelled");
+        if !confirmed {
+            term.write_line(&format!("{} Operation cancelled", style("❌").red()))?;
             return Ok(());
         }
     }
 
-    println!("🚧 TODO: Implement ISO removal from USB");
-    println!("   Would remove ISOs matching the specified criteria");
+    term.write_line(&format!(
+        "{} TODO: Implement ISO removal from USB",
+        style("🚧").yellow()
+    ))?;
+    term.write_line(&format!(
+        "   Would remove ISOs matching the specified criteria"
+    ))?;
 
     Ok(())
 }

@@ -1,8 +1,8 @@
 use crate::cli::ConfigAction;
 use crate::config::ConfigManager;
-use crate::registry::IsoRegistry;
-use crate::usb::UsbManager;
 use anyhow::Result;
+use console::{Term, style};
+use dialoguer::Confirm;
 use std::process;
 
 pub async fn handle_config(
@@ -10,30 +10,45 @@ pub async fn handle_config(
     action: ConfigAction,
     verbose: bool,
 ) -> Result<()> {
+    let term = Term::stdout();
+
     match action {
         ConfigAction::Show { section, format } => {
             let config_content = std::fs::read_to_string(config_manager.config_file())?;
 
             match section.as_deref() {
-                Some("general") => println!("🔧 General configuration:"),
-                Some("usb") => println!("💾 USB configuration:"),
-                Some("sources") => println!("🌐 Source configuration:"),
-                Some("distros") => println!("📦 Distribution configuration:"),
+                Some("general") => {
+                    term.write_line(&format!("{} General configuration:", style("🔧").cyan()))?
+                }
+                Some("usb") => {
+                    term.write_line(&format!("{} USB configuration:", style("💾").cyan()))?
+                }
+                Some("sources") => {
+                    term.write_line(&format!("{} Source configuration:", style("🌐").cyan()))?
+                }
+                Some("distros") => term.write_line(&format!(
+                    "{} Distribution configuration:",
+                    style("📦").cyan()
+                ))?,
                 Some(s) => {
-                    eprintln!("❌ Unknown section: {}", s);
+                    term.write_line(&format!("{} Unknown section: {}", style("❌").red(), s))?;
                     process::exit(1);
                 }
-                None => println!("⚙️  Current configuration:"),
+                None => {
+                    term.write_line(&format!("{} Current configuration:", style("⚙️").cyan()))?
+                }
             }
 
-            println!("{}", config_content);
+            term.write_line("")?;
+            term.write_line(&config_content)?;
         }
 
         ConfigAction::Edit { editor } => {
-            println!(
-                "📝 Config file location: {:?}",
+            term.write_line(&format!(
+                "{} Config file location: {:?}",
+                style("📝").cyan(),
                 config_manager.config_file()
-            );
+            ))?;
 
             let editor_cmd = editor
                 .or_else(|| std::env::var("EDITOR").ok())
@@ -45,42 +60,64 @@ pub async fn handle_config(
                     }
                 });
 
-            println!("🚀 Opening with {}...", editor_cmd);
+            term.write_line(&format!(
+                "{} Opening with {}...",
+                style("🚀").green(),
+                style(&editor_cmd).cyan()
+            ))?;
 
             let status = std::process::Command::new(&editor_cmd)
                 .arg(config_manager.config_file())
                 .status()?;
 
             if status.success() {
-                println!("✅ Configuration edited");
-                println!("💡 Run 'isod config validate' to check for issues");
+                term.write_line(&format!("{} Configuration edited", style("✅").green()))?;
+                term.write_line(&format!(
+                    "{} Run 'isod config validate' to check for issues",
+                    style("💡").yellow()
+                ))?;
             } else {
-                eprintln!("❌ Editor exited with error");
+                term.write_line(&format!("{} Editor exited with error", style("❌").red()))?;
             }
         }
 
         ConfigAction::Validate { fix, warnings } => {
-            println!("🔍 Validating configuration...");
+            term.write_line(&format!(
+                "{} Validating configuration...",
+                style("🔍").cyan()
+            ))?;
 
             match config_manager.validate() {
                 Ok(()) => {
-                    println!("✅ Configuration is valid");
+                    term.write_line(&format!("{} Configuration is valid", style("✅").green()))?;
                 }
                 Err(e) => {
-                    eprintln!("❌ Configuration validation failed:");
-                    eprintln!("   {}", e);
+                    term.write_line(&format!(
+                        "{} Configuration validation failed:",
+                        style("❌").red()
+                    ))?;
+                    term.write_line(&format!("   {}", e))?;
 
                     if fix {
-                        println!("🔧 TODO: Implement automatic fixes");
+                        term.write_line(&format!(
+                            "{} TODO: Implement automatic fixes",
+                            style("🔧").yellow()
+                        ))?;
                     } else {
-                        eprintln!("💡 Run with --fix to automatically fix common issues");
+                        term.write_line(&format!(
+                            "{} Run with --fix to automatically fix common issues",
+                            style("💡").yellow()
+                        ))?;
                         process::exit(1);
                     }
                 }
             }
 
             if warnings {
-                println!("⚠️  TODO: Implement warning checks");
+                term.write_line(&format!(
+                    "{} TODO: Implement warning checks",
+                    style("⚠️").yellow()
+                ))?;
             }
         }
 
@@ -88,18 +125,32 @@ pub async fn handle_config(
             let sample_file = if let Some(output_path) = output {
                 let path = std::path::PathBuf::from(output_path);
                 if path.exists() && !force {
-                    eprintln!("❌ File already exists: {:?}", path);
-                    eprintln!("💡 Use --force to overwrite");
+                    term.write_line(&format!(
+                        "{} File already exists: {:?}",
+                        style("❌").red(),
+                        path
+                    ))?;
+                    term.write_line(&format!(
+                        "{} Use --force to overwrite",
+                        style("💡").yellow()
+                    ))?;
                     process::exit(1);
                 }
 
-                println!("🚧 TODO: Implement custom sample location");
+                term.write_line(&format!(
+                    "{} TODO: Implement custom sample location",
+                    style("🚧").yellow()
+                ))?;
                 config_manager.create_sample_config()?
             } else {
                 config_manager.create_sample_config()?
             };
 
-            println!("✅ Sample configuration created at: {:?}", sample_file);
+            term.write_line(&format!(
+                "{} Sample configuration created at: {:?}",
+                style("✅").green(),
+                sample_file
+            ))?;
         }
 
         ConfigAction::Set {
@@ -107,48 +158,84 @@ pub async fn handle_config(
             value,
             value_type,
         } => {
-            println!("🔧 Setting {} = {}", key, value);
+            term.write_line(&format!(
+                "{} Setting {} = {}",
+                style("🔧").cyan(),
+                style(&key).cyan(),
+                style(&value).green()
+            ))?;
             if let Some(vt) = value_type {
-                println!("🏷️  Value type: {}", vt);
+                term.write_line(&format!("{} Value type: {}", style("🏷️").dim(), vt))?;
             }
-            println!("🚧 TODO: Implement config key setting with proper parsing");
-            println!("💡 For now, edit the config file manually with 'isod config edit'");
+            term.write_line(&format!(
+                "{} TODO: Implement config key setting with proper parsing",
+                style("🚧").yellow()
+            ))?;
+            term.write_line(&format!(
+                "{} For now, edit the config file manually with 'isod config edit'",
+                style("💡").yellow()
+            ))?;
         }
 
         ConfigAction::Get { key, format } => {
-            println!("🔍 Getting value for key: {}", key);
-            println!("📄 Format: {}", format);
-            println!("🚧 TODO: Implement config value retrieval");
+            term.write_line(&format!(
+                "{} Getting value for key: {}",
+                style("🔍").cyan(),
+                style(&key).cyan()
+            ))?;
+            term.write_line(&format!("{} Format: {}", style("📄").dim(), format))?;
+            term.write_line(&format!(
+                "{} TODO: Implement config value retrieval",
+                style("🚧").yellow()
+            ))?;
         }
 
         ConfigAction::Reset { section, yes } => {
             let target = section.as_deref().unwrap_or("all configuration");
 
             if !yes {
-                print!("❓ Are you sure you want to reset {}? [y/N]: ", target);
-                std::io::Write::flush(&mut std::io::stdout()).ok();
+                let confirmed = Confirm::new()
+                    .with_prompt(&format!(
+                        "Are you sure you want to reset {}?",
+                        style(target).cyan()
+                    ))
+                    .default(false)
+                    .interact()?;
 
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-
-                if !input.trim().to_lowercase().starts_with('y') {
-                    println!("❌ Operation cancelled");
+                if !confirmed {
+                    term.write_line(&format!("{} Operation cancelled", style("❌").red()))?;
                     return Ok(());
                 }
             }
 
-            println!("🔄 Resetting {}...", target);
-            println!("🚧 TODO: Implement configuration reset");
+            term.write_line(&format!("{} Resetting {}...", style("🔄").cyan(), target))?;
+            term.write_line(&format!(
+                "{} TODO: Implement configuration reset",
+                style("🚧").yellow()
+            ))?;
         }
 
         ConfigAction::Import { file, merge } => {
-            println!("📥 Importing configuration from: {}", file);
+            term.write_line(&format!(
+                "{} Importing configuration from: {}",
+                style("📥").cyan(),
+                style(&file).cyan()
+            ))?;
             if merge {
-                println!("🔀 Merge mode: existing config will be preserved where possible");
+                term.write_line(&format!(
+                    "{} Merge mode: existing config will be preserved where possible",
+                    style("🔀").blue()
+                ))?;
             } else {
-                println!("🔄 Replace mode: existing config will be overwritten");
+                term.write_line(&format!(
+                    "{} Replace mode: existing config will be overwritten",
+                    style("🔄").yellow()
+                ))?;
             }
-            println!("🚧 TODO: Implement configuration import");
+            term.write_line(&format!(
+                "{} TODO: Implement configuration import",
+                style("🚧").yellow()
+            ))?;
         }
 
         ConfigAction::Export {
@@ -156,12 +243,22 @@ pub async fn handle_config(
             format,
             documented,
         } => {
-            println!("📤 Exporting configuration to: {}", file);
-            println!("📄 Format: {}", format);
+            term.write_line(&format!(
+                "{} Exporting configuration to: {}",
+                style("📤").cyan(),
+                style(&file).cyan()
+            ))?;
+            term.write_line(&format!("{} Format: {}", style("📄").dim(), format))?;
             if documented {
-                println!("📝 Including documentation and comments");
+                term.write_line(&format!(
+                    "{} Including documentation and comments",
+                    style("📝").blue()
+                ))?;
             }
-            println!("🚧 TODO: Implement configuration export");
+            term.write_line(&format!(
+                "{} TODO: Implement configuration export",
+                style("🚧").yellow()
+            ))?;
         }
     }
     Ok(())

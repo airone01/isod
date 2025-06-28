@@ -8,6 +8,7 @@ use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands};
 use config::ConfigManager;
+use console::{Term, style};
 use registry::IsoRegistry;
 use std::process;
 use usb::UsbManager;
@@ -18,20 +19,9 @@ async fn main() -> Result<()> {
 
     // Validate CLI arguments first
     if let Err(e) = args.validate() {
-        eprintln!("Error: {}", e);
+        let term = Term::stderr();
+        term.write_line(&format!("{} {}", style("Error:").red().bold(), e))?;
         process::exit(1);
-    }
-
-    // Initialize logging based on verbosity
-    let verbose = args.verbose;
-    if args.verbose {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .init();
-    } else {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .init();
     }
 
     // Initialize systems
@@ -44,9 +34,20 @@ async fn main() -> Result<()> {
 
     if !skip_config_validation {
         if let Err(e) = config_manager.validate() {
-            eprintln!("Configuration validation failed: {}", e);
-            eprintln!("Run 'isod config validate --fix' to automatically fix common issues");
-            eprintln!("Or run 'isod config validate' for detailed validation report");
+            let term = Term::stderr();
+            term.write_line(&format!(
+                "{} Configuration validation failed: {}",
+                style("Error:").red().bold(),
+                e
+            ))?;
+            term.write_line(&format!(
+                "{} Run 'isod config validate --fix' to automatically fix common issues",
+                style("Hint:").cyan()
+            ))?;
+            term.write_line(&format!(
+                "{} Or run 'isod config validate' for detailed validation report",
+                style("Hint:").cyan()
+            ))?;
             process::exit(1);
         }
     }
@@ -70,7 +71,7 @@ async fn main() -> Result<()> {
                 version,
                 all_variants,
                 all_archs,
-                verbose,
+                args.verbose,
             )
             .await?;
         }
@@ -87,7 +88,7 @@ async fn main() -> Result<()> {
                 force,
                 check_only,
                 include_beta,
-                verbose,
+                args.verbose,
             )
             .await?;
         }
@@ -104,7 +105,7 @@ async fn main() -> Result<()> {
                 installed,
                 versions,
                 distro,
-                long || verbose,
+                long || args.verbose,
             )
             .await?;
         }
@@ -139,12 +140,12 @@ async fn main() -> Result<()> {
                 auto,
                 verify,
                 download,
-                verbose,
+                args.verbose,
             )
             .await?;
         }
         Commands::Config { action } => {
-            handlers::handle_config(&mut config_manager, action, verbose).await?;
+            handlers::handle_config(&mut config_manager, action, args.verbose).await?;
         }
         Commands::Clean {
             keep,
@@ -161,7 +162,7 @@ async fn main() -> Result<()> {
                 min_age,
                 distro,
                 cache,
-                verbose,
+                args.verbose,
             )
             .await?;
         }
@@ -185,7 +186,7 @@ async fn main() -> Result<()> {
                 torrent,
                 max_concurrent,
                 verify,
-                verbose,
+                args.verbose,
             )
             .await?;
         }
@@ -194,7 +195,7 @@ async fn main() -> Result<()> {
             detailed,
             limit,
         } => {
-            handlers::handle_search(&iso_registry, query, detailed, limit, verbose).await?;
+            handlers::handle_search(&iso_registry, query, detailed, limit, args.verbose).await?;
         }
         Commands::Info {
             distro,
@@ -202,8 +203,15 @@ async fn main() -> Result<()> {
             sources,
             details,
         } => {
-            handlers::handle_info(&iso_registry, distro, versions, sources, details, verbose)
-                .await?;
+            handlers::handle_info(
+                &iso_registry,
+                distro,
+                versions,
+                sources,
+                details,
+                args.verbose,
+            )
+            .await?;
         }
     }
 
@@ -213,23 +221,9 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
-
-    static INIT: Once = Once::new();
-
-    fn init_test_logging() {
-        INIT.call_once(|| {
-            tracing_subscriber::fmt()
-                .with_max_level(tracing::Level::DEBUG)
-                .with_test_writer()
-                .init();
-        });
-    }
 
     #[tokio::test]
     async fn test_config_manager_initialization() {
-        init_test_logging();
-
         // Test that config manager can be created
         let result = ConfigManager::new();
         assert!(
@@ -240,8 +234,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_iso_registry_initialization() {
-        init_test_logging();
-
         // Test that ISO registry can be created and has distros
         let registry = IsoRegistry::new();
         let distros = registry.get_all_distros();
@@ -263,8 +255,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_usb_manager_initialization() {
-        init_test_logging();
-
         // Test that USB manager can be created
         let usb_manager = UsbManager::new();
 
@@ -293,8 +283,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_error_handling() {
-        init_test_logging();
-
         let registry = IsoRegistry::new();
 
         // Test unsupported distro handling

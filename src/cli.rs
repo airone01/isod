@@ -77,7 +77,7 @@ pub enum Commands {
         force: bool,
 
         /// Check for updates without downloading
-        #[arg(short, long)]
+        #[arg(long)]
         #[arg(help = "Check for updates without downloading")]
         check_only: bool,
 

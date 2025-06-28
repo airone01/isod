@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use console::{Term, style};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,7 +9,6 @@ use std::time::{Duration, SystemTime};
 use tokio::fs;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::interval;
-use tracing::{debug, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsbDevice {
@@ -52,8 +52,6 @@ impl UsbManager {
 
     /// Scan for all USB storage devices
     pub async fn scan_devices(&self) -> Result<Vec<UsbDevice>> {
-        debug!("Scanning for USB devices...");
-
         #[cfg(target_os = "linux")]
         let devices = self.scan_devices_linux().await?;
         #[cfg(target_os = "windows")]
@@ -71,7 +69,12 @@ impl UsbManager {
             );
         }
 
-        info!("Found {} USB storage devices", devices.len());
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Found {} USB storage devices",
+            style("🔍").cyan(),
+            style(devices.len()).green()
+        ));
         Ok(devices)
     }
 
@@ -86,7 +89,12 @@ impl UsbManager {
             }
         }
 
-        info!("Found {} Ventoy devices", ventoy_devices.len());
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Found {} Ventoy devices",
+            style("📀").cyan(),
+            style(ventoy_devices.len()).green()
+        ));
         Ok(ventoy_devices)
     }
 
@@ -142,11 +150,13 @@ impl UsbManager {
         let mut current = self.current_device.write().await;
         *current = Some(device.clone());
 
-        info!(
-            "Selected device: {} ({})",
-            device_path,
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Selected device: {} ({})",
+            style("✅").green(),
+            style(device_path).cyan(),
             device.label.as_deref().unwrap_or("unlabeled")
-        );
+        ));
 
         if let Some(sender) = &self.event_sender {
             let _ = sender.send(UsbEvent::VentoyDetected(device));
@@ -219,7 +229,12 @@ impl UsbManager {
                     // Check for new devices
                     for (path, device) in &current_map {
                         if !last_devices.contains_key(path) {
-                            debug!("New device detected: {}", path);
+                            let term = Term::stderr();
+                            let _ = term.write_line(&format!(
+                                "{} New device detected: {}",
+                                style("🔌").green(),
+                                style(path).cyan()
+                            ));
                             let _ = sender_ref.send(UsbEvent::DeviceAdded(device.clone()));
                         } else if let Some(old_device) = last_devices.get(path) {
                             // Check if device was updated (mount status changed)
@@ -232,7 +247,12 @@ impl UsbManager {
                     // Check for removed devices
                     for path in last_devices.keys() {
                         if !current_map.contains_key(path) {
-                            debug!("Device removed: {}", path);
+                            let term = Term::stderr();
+                            let _ = term.write_line(&format!(
+                                "{} Device removed: {}",
+                                style("🔌").red(),
+                                style(path).cyan()
+                            ));
                             let _ = sender_ref.send(UsbEvent::DeviceRemoved(path.clone()));
                         }
                     }
@@ -248,7 +268,11 @@ impl UsbManager {
             }
         });
 
-        info!("Started USB device monitoring");
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Started USB device monitoring",
+            style("👁️").cyan()
+        ));
         Ok(receiver)
     }
 
@@ -256,7 +280,11 @@ impl UsbManager {
     pub async fn stop_monitoring(&self) {
         let mut monitoring = self.monitoring.write().await;
         *monitoring = false;
-        info!("Stopped USB device monitoring");
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Stopped USB device monitoring",
+            style("👁️").yellow()
+        ));
     }
 
     /// Get the ISO directory for the current device
@@ -323,10 +351,6 @@ impl UsbManager {
         }
 
         device.is_ventoy = true;
-        debug!(
-            "Ventoy installation detected on {}",
-            device.device_path.display()
-        );
         Ok(())
     }
 
@@ -336,11 +360,7 @@ impl UsbManager {
 
         // Use lsblk to get device information
         let output = Command::new("lsblk")
-            .args(&[
-                "-J",
-                "-o",
-                "NAME,MOUNTPOINT,LABEL,FSTYPE,SIZE,AVAIL,TYPE,HOTPLUG",
-            ])
+            .args(["-J", "-o", "NAME,MOUNTPOINT,LABEL,FSTYPE,SIZE,TYPE,HOTPLUG"])
             .output()
             .context("Failed to execute lsblk command")?;
 
@@ -439,9 +459,12 @@ impl UsbManager {
             .context("Failed to execute PowerShell command")?;
 
         if !output.status.success() {
-            #[allow(unused_imports)]
-            use tracing::warn;
-            warn!("PowerShell command failed, trying alternative method");
+            if let Ok(term) = Term::stderr() {
+                let _ = term.write_line(&format!(
+                    "{} PowerShell command failed, trying alternative method",
+                    style("⚠️").yellow()
+                ));
+            }
             return self.scan_devices_windows_fallback().await;
         }
 
@@ -471,7 +494,7 @@ impl UsbManager {
 
         for letter in 'A'..='Z' {
             let drive_path = format!("{}:\\", letter);
-            let path = Path::new(&drive_path);
+            let path = std::path::Path::new(&drive_path);
 
             if path.exists() {
                 // Check if it's a removable drive using fsutil
@@ -532,7 +555,7 @@ impl UsbManager {
     }
 
     #[cfg(target_os = "windows")]
-    async fn create_windows_device_from_path(&self, path: &Path) -> Result<UsbDevice> {
+    async fn create_windows_device_from_path(&self, path: &std::path::Path) -> Result<UsbDevice> {
         // Basic implementation for fallback method
         let mut usb_device = UsbDevice {
             device_path: path.to_path_buf(),

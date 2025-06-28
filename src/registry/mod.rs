@@ -3,10 +3,10 @@ pub mod sources;
 pub mod version_detection;
 
 use anyhow::{Context, Result, bail};
+use console::{Term, style};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use tracing::{debug, info, warn};
 
 pub use sources::{DownloadSource, SourcePriority, SourceType};
 pub use version_detection::{ReleaseType, VersionDetector, VersionInfo};
@@ -60,7 +60,11 @@ impl IsoRegistry {
 
     /// Load all built-in distro definitions
     fn load_builtin_distros(&mut self) {
-        info!("Loading built-in distro definitions...");
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Loading built-in distro definitions...",
+            style("📦").cyan()
+        ));
 
         // Load each distro definition
         if let Ok(ubuntu) = distros::ubuntu::create_definition() {
@@ -79,7 +83,11 @@ impl IsoRegistry {
             self.distros.insert("arch".to_string(), arch);
         }
 
-        info!("Loaded {} built-in distro definitions", self.distros.len());
+        let _ = term.write_line(&format!(
+            "{} Loaded {} built-in distro definitions",
+            style("✅").green(),
+            style(self.distros.len()).green().bold()
+        ));
     }
 
     /// Get all available distros (built-in + custom)
@@ -108,7 +116,6 @@ impl IsoRegistry {
             .get_distro(distro)
             .with_context(|| format!("Distro '{}' not found in registry", distro))?;
 
-        debug!("Checking available versions for {}", distro);
         definition
             .version_detector
             .detect_versions()
@@ -212,13 +219,24 @@ impl IsoRegistry {
     pub fn add_custom_distro(&mut self, definition: DistroDefinition) {
         let name = definition.name.clone();
         self.custom_distros.insert(name.clone(), definition);
-        info!("Added custom distro definition: {}", name);
+
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Added custom distro definition: {}",
+            style("✅").green(),
+            style(&name).cyan()
+        ));
     }
 
     /// Remove a custom distro definition
     pub fn remove_custom_distro(&mut self, name: &str) -> bool {
         if self.custom_distros.remove(name).is_some() {
-            info!("Removed custom distro definition: {}", name);
+            let term = Term::stderr();
+            let _ = term.write_line(&format!(
+                "{} Removed custom distro definition: {}",
+                style("🗑️").yellow(),
+                style(name).cyan()
+            ));
             true
         } else {
             false
@@ -342,9 +360,12 @@ impl IsoRegistry {
             }
         }
 
-        #[allow(unused_imports)]
-        use tracing::warn;
-        warn!("No checksum found for {}", iso_info.filename);
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} No checksum found for {}",
+            style("⚠️").yellow(),
+            iso_info.filename
+        ));
         Ok(None)
     }
 

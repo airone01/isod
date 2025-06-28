@@ -2,6 +2,9 @@ use crate::config::ConfigManager;
 use crate::registry::IsoRegistry;
 use crate::usb::UsbManager;
 use anyhow::Result;
+use console::{Term, style};
+use indicatif::{ProgressBar, ProgressStyle};
+use std::time::Duration;
 
 pub async fn handle_list(
     config_manager: &ConfigManager,
@@ -12,29 +15,35 @@ pub async fn handle_list(
     filter_distro: Option<String>,
     detailed: bool,
 ) -> Result<()> {
+    let term = Term::stdout();
+
     if installed {
-        println!("💾 Installed ISOs:");
+        term.write_line(&format!("{} Installed ISOs:", style("💾").cyan().bold()))?;
 
         let ventoy_devices = usb_manager.find_ventoy_devices().await?;
 
         if ventoy_devices.is_empty() {
-            println!("❌ No Ventoy devices found.");
-            println!("💡 Make sure your USB device is:");
-            println!("   • Connected and mounted");
-            println!("   • Has Ventoy installed");
-            println!("   • Is properly formatted");
+            term.write_line(&format!("{} No Ventoy devices found.", style("❌").red()))?;
+            term.write_line(&format!(
+                "{} Make sure your USB device is:",
+                style("💡").yellow()
+            ))?;
+            term.write_line(&format!("   {} Connected and mounted", style("•").dim()))?;
+            term.write_line(&format!("   {} Has Ventoy installed", style("•").dim()))?;
+            term.write_line(&format!("   {} Is properly formatted", style("•").dim()))?;
             return Ok(());
         }
 
         for device in ventoy_devices {
-            println!(
-                "\n🔌 Device: {} ({})",
-                device.device_path.display(),
+            term.write_line(&format!(
+                "\n{} Device: {} ({})",
+                style("🔌").cyan(),
+                style(device.device_path.display()).cyan(),
                 device.label.as_deref().unwrap_or("unlabeled")
-            );
+            ))?;
 
             if let Some(version) = &device.ventoy_version {
-                println!("   Ventoy version: {}", version);
+                term.write_line(&format!("   Ventoy version: {}", style(version).green()))?;
             }
 
             if let Some(mount_point) = &device.mount_point {
@@ -67,9 +76,15 @@ pub async fn handle_list(
 
                             if isos.is_empty() {
                                 if filter_distro.is_some() {
-                                    println!("   📭 No ISOs found matching filter");
+                                    term.write_line(&format!(
+                                        "   {} No ISOs found matching filter",
+                                        style("📭").dim()
+                                    ))?;
                                 } else {
-                                    println!("   📭 No ISO files found");
+                                    term.write_line(&format!(
+                                        "   {} No ISO files found",
+                                        style("📭").dim()
+                                    ))?;
                                 }
                             } else {
                                 isos.sort_by(|a, b| a.0.cmp(&b.0));
@@ -78,29 +93,49 @@ pub async fn handle_list(
                                         if let Ok(metadata) = std::fs::metadata(&path) {
                                             let size_gb =
                                                 metadata.len() as f64 / (1024.0 * 1024.0 * 1024.0);
-                                            println!("   📀 {} ({:.1} GB)", name, size_gb);
+                                            term.write_line(&format!(
+                                                "   {} {} ({:.1} GB)",
+                                                style("📀").green(),
+                                                style(&name).cyan(),
+                                                size_gb
+                                            ))?;
                                         } else {
-                                            println!("   📀 {}", name);
+                                            term.write_line(&format!(
+                                                "   {} {}",
+                                                style("📀").green(),
+                                                style(&name).cyan()
+                                            ))?;
                                         }
                                     } else {
-                                        println!("   📀 {}", name);
+                                        term.write_line(&format!(
+                                            "   {} {}",
+                                            style("📀").green(),
+                                            style(&name).cyan()
+                                        ))?;
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("   ❌ Error reading ISO directory: {}", e);
+                            term.write_line(&format!(
+                                "   {} Error reading ISO directory: {}",
+                                style("❌").red(),
+                                e
+                            ))?;
                         }
                     }
                 } else {
-                    println!("   📂 ISO directory not found");
+                    term.write_line(&format!("   {} ISO directory not found", style("📂").dim()))?;
                 }
             } else {
-                println!("   ❌ Device not mounted");
+                term.write_line(&format!("   {} Device not mounted", style("❌").red()))?;
             }
         }
     } else {
-        println!("📋 Available distributions:");
+        term.write_line(&format!(
+            "{} Available distributions:",
+            style("📋").cyan().bold()
+        ))?;
 
         let all_distros = iso_registry.get_all_distros();
         let filtered_distros: Vec<&str> = if let Some(ref filter) = filter_distro {
@@ -114,9 +149,12 @@ pub async fn handle_list(
 
         if filtered_distros.is_empty() {
             if filter_distro.is_some() {
-                println!("❌ No distributions found matching filter");
+                term.write_line(&format!(
+                    "{} No distributions found matching filter",
+                    style("❌").red()
+                ))?;
             } else {
-                println!("❌ No distributions available");
+                term.write_line(&format!("{} No distributions available", style("❌").red()))?;
             }
             return Ok(());
         }
@@ -127,39 +165,77 @@ pub async fn handle_list(
                     .get_distro_config(distro_name)
                     .map_or(false, |c| c.enabled);
 
-                let status = if configured { "✅" } else { "⬜" };
-                println!("  {} {} - {}", status, distro_name, definition.display_name);
+                let status = if configured {
+                    style("✅").green()
+                } else {
+                    style("⬜").dim()
+                };
+                term.write_line(&format!(
+                    "  {} {} - {}",
+                    status,
+                    style(distro_name).cyan(),
+                    definition.display_name
+                ))?;
 
                 if detailed {
-                    println!("     📝 {}", definition.description);
-                    println!(
-                        "     🏗️  Architectures: {:?}",
+                    term.write_line(&format!(
+                        "     {} {}",
+                        style("📝").dim(),
+                        definition.description
+                    ))?;
+                    term.write_line(&format!(
+                        "     {} Architectures: {:?}",
+                        style("🏗️").dim(),
                         definition.supported_architectures
-                    );
-                    println!("     📦 Variants: {:?}", definition.supported_variants);
-                    println!("     🌐 Homepage: {}", definition.homepage);
+                    ))?;
+                    term.write_line(&format!(
+                        "     {} Variants: {:?}",
+                        style("📦").dim(),
+                        definition.supported_variants
+                    ))?;
+                    term.write_line(&format!(
+                        "     {} Homepage: {}",
+                        style("🌐").dim(),
+                        definition.homepage
+                    ))?;
 
                     if show_versions {
-                        print!("     🔍 Checking versions... ");
-                        std::io::Write::flush(&mut std::io::stdout()).ok();
+                        let spinner = ProgressBar::new_spinner();
+                        spinner.set_style(
+                            ProgressStyle::default_spinner()
+                                .template("     {spinner:.blue} Checking versions...")
+                                .unwrap(),
+                        );
+                        spinner.enable_steady_tick(Duration::from_millis(100));
+
                         match iso_registry.get_latest_version(distro_name).await {
                             Ok(version_info) => {
-                                println!(
-                                    "Latest: {} ({})",
-                                    version_info.version, version_info.release_type
-                                );
+                                spinner.finish_and_clear();
+                                term.write_line(&format!(
+                                    "     {} Latest: {} ({})",
+                                    style("🔍").cyan(),
+                                    style(&version_info.version).green(),
+                                    version_info.release_type
+                                ))?;
                             }
                             Err(_) => {
-                                println!("❌ Unable to fetch");
+                                spinner.finish_and_clear();
+                                term.write_line(&format!(
+                                    "     {} Unable to fetch",
+                                    style("❌").red()
+                                ))?;
                             }
                         }
                     }
-                    println!();
+                    term.write_line("")?;
                 }
             }
         }
 
-        println!("\n🛠️  Configured distributions:");
+        term.write_line(&format!(
+            "\n{} Configured distributions:",
+            style("🛠️").cyan().bold()
+        ))?;
         let mut configured_count = 0;
         for (name, config) in &config_manager.config().distros {
             if config.enabled {
@@ -169,20 +245,29 @@ pub async fn handle_list(
                     }
                 }
 
-                println!(
-                    "  ✅ {} - variants: {:?}, architectures: {:?}",
-                    name, config.variants, config.architectures
-                );
+                term.write_line(&format!(
+                    "  {} {} - variants: {:?}, architectures: {:?}",
+                    style("✅").green(),
+                    style(name).cyan(),
+                    config.variants,
+                    config.architectures
+                ))?;
                 configured_count += 1;
             }
         }
 
         if configured_count == 0 {
             if filter_distro.is_some() {
-                println!("  📭 No configured distributions matching filter");
+                term.write_line(&format!(
+                    "  {} No configured distributions matching filter",
+                    style("📭").dim()
+                ))?;
             } else {
-                println!("  📭 None configured");
-                println!("  💡 Use 'isod add <distro>' to add distributions");
+                term.write_line(&format!("  {} None configured", style("📭").dim()))?;
+                term.write_line(&format!(
+                    "  {} Use 'isod add <distro>' to add distributions",
+                    style("💡").yellow()
+                ))?;
             }
         }
     }
