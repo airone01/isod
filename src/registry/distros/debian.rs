@@ -16,13 +16,17 @@ pub fn create_definition() -> Result<DistroDefinition> {
         ))
         // Static versions for stable Debian releases
         .add_detector(detectors::static_versions(vec![
-            VersionInfo::new("12.5", ReleaseType::Stable)
-                .with_release_date("2024-02-10")
+            VersionInfo::new("12.11.0", ReleaseType::Stable)
+                .with_release_date("2024-12-15")
                 .with_download_base("https://cdimage.debian.org/debian-cd/current/")
                 .with_notes("Bookworm - Current stable"),
-            VersionInfo::new("11.9", ReleaseType::Stable)
-                .with_release_date("2023-02-11")
-                .with_download_base("https://cdimage.debian.org/debian-cd/11.9.0/")
+            VersionInfo::new("12.10.0", ReleaseType::Stable)
+                .with_release_date("2024-11-09")
+                .with_download_base("https://cdimage.debian.org/debian-cd/12.10.0/")
+                .with_notes("Bookworm - Previous stable"),
+            VersionInfo::new("11.11.0", ReleaseType::Stable)
+                .with_release_date("2024-11-09")
+                .with_download_base("https://cdimage.debian.org/debian-cd/11.11.0/")
                 .with_notes("Bullseye - Oldstable"),
             VersionInfo::new("13.0", ReleaseType::Beta)
                 .with_notes("Trixie - Testing")

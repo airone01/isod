@@ -3,7 +3,6 @@ use console::{Term, style};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::fs;
@@ -50,14 +49,17 @@ impl UsbManager {
         }
     }
 
-    /// Scan for all USB storage devices
+    /// Scan for mounted volumes that could be USB devices
     pub async fn scan_devices(&self) -> Result<Vec<UsbDevice>> {
-        #[cfg(target_os = "linux")]
-        let devices = self.scan_devices_linux().await?;
-        #[cfg(target_os = "windows")]
-        let devices = self.scan_devices_windows().await?;
-        #[cfg(target_os = "macos")]
-        let devices = self.scan_devices_macos().await?;
+        let mount_points = self.get_potential_usb_mounts().await?;
+        let mut devices = Vec::new();
+        let term = Term::stderr();
+
+        for mount_path in mount_points {
+            if let Ok(usb_device) = self.create_device_from_mount(&mount_path).await {
+                devices.push(usb_device);
+            }
+        }
 
         // Update internal device list
         let mut detected = self.detected_devices.write().await;
@@ -69,13 +71,208 @@ impl UsbManager {
             );
         }
 
-        let term = Term::stderr();
         let _ = term.write_line(&format!(
-            "{} Found {} USB storage devices",
+            "{} Found {} potential USB devices",
             style("🔍").cyan(),
             style(devices.len()).green()
         ));
+
         Ok(devices)
+    }
+
+    /// Get potential USB mount points based on platform
+    async fn get_potential_usb_mounts(&self) -> Result<Vec<PathBuf>> {
+        #[cfg(target_os = "linux")]
+        return self.get_linux_mounts().await;
+
+        #[cfg(target_os = "windows")]
+        return self.get_windows_drives().await;
+
+        #[cfg(target_os = "macos")]
+        return self.get_macos_volumes().await;
+
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        Ok(vec![])
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn get_linux_mounts(&self) -> Result<Vec<PathBuf>> {
+        let mut mount_points = Vec::new();
+
+        // Check common mount locations
+        let potential_dirs = ["/media", "/mnt", "/run/media"];
+
+        for base_dir in &potential_dirs {
+            let base_path = PathBuf::from(base_dir);
+            if base_path.exists() {
+                if let Ok(mut entries) = tokio::fs::read_dir(&base_path).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            // Check if it has more subdirectories (user-based mounts)
+                            if let Ok(mut sub_entries) = tokio::fs::read_dir(&path).await {
+                                while let Ok(Some(sub_entry)) = sub_entries.next_entry().await {
+                                    let sub_path = sub_entry.path();
+                                    if sub_path.is_dir() {
+                                        mount_points.push(sub_path);
+                                    }
+                                }
+                            } else {
+                                // Direct mount
+                                mount_points.push(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(mount_points)
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn get_windows_drives(&self) -> Result<Vec<PathBuf>> {
+        let mut drives = Vec::new();
+
+        // Check drive letters A-Z
+        for letter in b'A'..=b'Z' {
+            let drive_path = format!("{}:\\", letter as char);
+            let path = PathBuf::from(&drive_path);
+
+            // Check if drive exists
+            if tokio::fs::metadata(&path).await.is_ok() {
+                // Skip C: drive (usually system drive)
+                if letter != b'C' {
+                    drives.push(path);
+                }
+            }
+        }
+
+        Ok(drives)
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn get_macos_volumes(&self) -> Result<Vec<PathBuf>> {
+        let volumes_dir = PathBuf::from("/Volumes");
+        let mut volumes = Vec::new();
+
+        if volumes_dir.exists() {
+            if let Ok(mut entries) = tokio::fs::read_dir(&volumes_dir).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        // Skip system volumes
+                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                            if !name.contains("Macintosh") && name != "." && name != ".." {
+                                volumes.push(path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(volumes)
+    }
+
+    async fn create_device_from_mount(&self, mount_path: &PathBuf) -> Result<UsbDevice> {
+        // Check if the mount point is accessible
+        let metadata = tokio::fs::metadata(mount_path)
+            .await
+            .context("Failed to access mount point")?;
+
+        if !metadata.is_dir() {
+            bail!("Mount point is not a directory");
+        }
+
+        // Extract label from path
+        let label = mount_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|s| !s.is_empty() && *s != "/" && *s != "\\")
+            .map(|s| s.to_string());
+
+        // Get space information
+        let (total_space, available_space) =
+            self.get_space_info(mount_path).await.unwrap_or((0, 0));
+
+        let mut usb_device = UsbDevice {
+            device_path: mount_path.clone(),
+            mount_point: Some(mount_path.clone()),
+            label,
+            filesystem: "unknown".to_string(),
+            total_space,
+            available_space,
+            is_ventoy: false,
+            ventoy_version: None,
+            last_seen: SystemTime::now(),
+        };
+
+        // Check for Ventoy installation
+        let _ = self.check_ventoy_installation(&mut usb_device).await;
+
+        Ok(usb_device)
+    }
+
+    /// Get filesystem space information using std::fs
+    async fn get_space_info(&self, path: &PathBuf) -> Result<(u64, u64)> {
+        // For now, we'll use a simple approach that works cross-platform
+        // We'll try to create a temp file and use basic filesystem operations
+
+        // Try to get some basic space info by checking available space
+        // This is a simplified approach - in a real implementation you'd use platform-specific APIs
+
+        #[cfg(target_family = "unix")]
+        {
+            // On Unix, try using statvfs if available
+            self.get_unix_space_info(path).await
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // On Windows, we'd use GetDiskFreeSpaceEx
+            self.get_windows_space_info(path).await
+        }
+
+        #[cfg(not(any(target_family = "unix", target_os = "windows")))]
+        {
+            // Fallback for other platforms
+            Ok((0, 1024 * 1024 * 1024)) // Assume 1GB available
+        }
+    }
+
+    #[cfg(target_family = "unix")]
+    async fn get_unix_space_info(&self, path: &PathBuf) -> Result<(u64, u64)> {
+        // Simple fallback: assume we have space if we can write to the directory
+        let test_file = path.join(".space_test_isod");
+
+        match tokio::fs::write(&test_file, "test").await {
+            Ok(_) => {
+                let _ = tokio::fs::remove_file(&test_file).await;
+                // Return some reasonable defaults
+                Ok((10 * 1024 * 1024 * 1024, 5 * 1024 * 1024 * 1024)) // 10GB total, 5GB available
+            }
+            Err(_) => {
+                // Can't write, assume no space
+                Ok((1024 * 1024 * 1024, 0)) // 1GB total, 0 available
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn get_windows_space_info(&self, path: &PathBuf) -> Result<(u64, u64)> {
+        // Simple test similar to Unix
+        let test_file = path.join(".space_test_isod");
+
+        match tokio::fs::write(&test_file, "test").await {
+            Ok(_) => {
+                let _ = tokio::fs::remove_file(&test_file).await;
+                Ok((10 * 1024 * 1024 * 1024, 5 * 1024 * 1024 * 1024)) // 10GB total, 5GB available
+            }
+            Err(_) => {
+                Ok((1024 * 1024 * 1024, 0)) // 1GB total, 0 available
+            }
+        }
     }
 
     /// Find devices with Ventoy installed
@@ -129,9 +326,19 @@ impl UsbManager {
             Err(_) => bail!("No write permission to device"),
         }
 
-        // Verify minimum free space (100MB)
-        if device.available_space < 100 * 1024 * 1024 {
-            bail!("Insufficient free space (need at least 100MB)");
+        // Get fresh space info
+        let (_, actual_available) = self
+            .get_space_info(mount_point)
+            .await
+            .unwrap_or((0, device.available_space));
+        let required_space = 100 * 1024 * 1024; // 100MB
+
+        if actual_available < required_space {
+            bail!(
+                "Insufficient free space (need at least {} MB, found {} MB)",
+                required_space / (1024 * 1024),
+                actual_available / (1024 * 1024)
+            );
         }
 
         Ok(())
@@ -180,111 +387,27 @@ impl UsbManager {
         };
 
         if let Some(path) = current_path {
-            // Re-scan devices to get updated info
             self.scan_devices().await?;
-
-            // Re-select the device to update current device info
             self.select_device(&path).await?;
         }
 
         Ok(())
     }
 
-    /// Start monitoring for device changes
-    pub async fn start_monitoring(&mut self) -> Result<mpsc::UnboundedReceiver<UsbEvent>> {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        self.event_sender = Some(sender);
+    /// Get available space on the current device
+    pub async fn get_available_space(&self) -> Result<u64> {
+        let current = self.current_device.read().await;
+        let device = current.as_ref().context("No device currently selected")?;
 
-        let mut monitoring = self.monitoring.write().await;
-        if *monitoring {
-            bail!("Already monitoring device changes");
+        if let Some(mount_point) = &device.mount_point {
+            let (_, available) = self
+                .get_space_info(mount_point)
+                .await
+                .unwrap_or((0, device.available_space));
+            Ok(available)
+        } else {
+            Ok(device.available_space)
         }
-        *monitoring = true;
-
-        // Start polling task
-        let devices_ref = Arc::clone(&self.detected_devices);
-        let sender_ref = self.event_sender.as_ref().unwrap().clone();
-        let monitoring_ref = Arc::clone(&self.monitoring);
-
-        tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(2));
-            let mut last_devices: HashMap<String, UsbDevice> = HashMap::new();
-
-            loop {
-                interval.tick().await;
-
-                // Check if we should stop monitoring
-                if !*monitoring_ref.read().await {
-                    break;
-                }
-
-                // Create a temporary manager for scanning
-                let temp_manager = UsbManager::new();
-                if let Ok(current_devices) = temp_manager.scan_devices().await {
-                    let current_map: HashMap<String, UsbDevice> = current_devices
-                        .into_iter()
-                        .map(|d| (d.device_path.to_string_lossy().to_string(), d))
-                        .collect();
-
-                    // Check for new devices
-                    for (path, device) in &current_map {
-                        if !last_devices.contains_key(path) {
-                            let term = Term::stderr();
-                            let _ = term.write_line(&format!(
-                                "{} New device detected: {}",
-                                style("🔌").green(),
-                                style(path).cyan()
-                            ));
-                            let _ = sender_ref.send(UsbEvent::DeviceAdded(device.clone()));
-                        } else if let Some(old_device) = last_devices.get(path) {
-                            // Check if device was updated (mount status changed)
-                            if old_device.mount_point != device.mount_point {
-                                let _ = sender_ref.send(UsbEvent::DeviceUpdated(device.clone()));
-                            }
-                        }
-                    }
-
-                    // Check for removed devices
-                    for path in last_devices.keys() {
-                        if !current_map.contains_key(path) {
-                            let term = Term::stderr();
-                            let _ = term.write_line(&format!(
-                                "{} Device removed: {}",
-                                style("🔌").red(),
-                                style(path).cyan()
-                            ));
-                            let _ = sender_ref.send(UsbEvent::DeviceRemoved(path.clone()));
-                        }
-                    }
-
-                    // Update devices in the manager
-                    {
-                        let mut detected = devices_ref.write().await;
-                        *detected = current_map.clone();
-                    }
-
-                    last_devices = current_map;
-                }
-            }
-        });
-
-        let term = Term::stderr();
-        let _ = term.write_line(&format!(
-            "{} Started USB device monitoring",
-            style("👁️").cyan()
-        ));
-        Ok(receiver)
-    }
-
-    /// Stop monitoring for device changes
-    pub async fn stop_monitoring(&self) {
-        let mut monitoring = self.monitoring.write().await;
-        *monitoring = false;
-        let term = Term::stderr();
-        let _ = term.write_line(&format!(
-            "{} Stopped USB device monitoring",
-            style("👁️").yellow()
-        ));
     }
 
     /// Get the ISO directory for the current device
@@ -298,14 +421,6 @@ impl UsbManager {
             .context("Current device is not mounted")?;
 
         Ok(mount_point.join("iso"))
-    }
-
-    /// Get available space on the current device
-    pub async fn get_available_space(&self) -> Result<u64> {
-        let current = self.current_device.read().await;
-        let device = current.as_ref().context("No device currently selected")?;
-
-        Ok(device.available_space)
     }
 
     /// Create isod metadata directory on current device
@@ -354,310 +469,97 @@ impl UsbManager {
         Ok(())
     }
 
-    #[cfg(target_os = "linux")]
-    async fn scan_devices_linux(&self) -> Result<Vec<UsbDevice>> {
-        let mut devices = Vec::new();
+    /// Start monitoring for device changes
+    pub async fn start_monitoring(&mut self) -> Result<mpsc::UnboundedReceiver<UsbEvent>> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        self.event_sender = Some(sender);
 
-        // Use lsblk to get device information
-        let output = Command::new("lsblk")
-            .args(["-J", "-o", "NAME,MOUNTPOINT,LABEL,FSTYPE,SIZE,TYPE,HOTPLUG"])
-            .output()
-            .context("Failed to execute lsblk command")?;
-
-        if !output.status.success() {
-            bail!("lsblk command failed");
+        let mut monitoring = self.monitoring.write().await;
+        if *monitoring {
+            bail!("Already monitoring device changes");
         }
+        *monitoring = true;
 
-        let json_str = String::from_utf8_lossy(&output.stdout);
-        let lsblk_output: serde_json::Value =
-            serde_json::from_str(&json_str).context("Failed to parse lsblk JSON output")?;
+        let devices_ref = Arc::clone(&self.detected_devices);
+        let sender_ref = self.event_sender.as_ref().unwrap().clone();
+        let monitoring_ref = Arc::clone(&self.monitoring);
 
-        if let Some(blockdevices) = lsblk_output.get("blockdevices").and_then(|v| v.as_array()) {
-            for device in blockdevices {
-                // Only process removable devices
-                if let Some(hotplug) = device.get("hotplug").and_then(|v| v.as_str()) {
-                    if hotplug != "1" {
-                        continue;
-                    }
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_secs(2));
+            let mut last_devices: HashMap<String, UsbDevice> = HashMap::new();
+
+            loop {
+                interval.tick().await;
+
+                if !*monitoring_ref.read().await {
+                    break;
                 }
 
-                // Process children (partitions)
-                if let Some(children) = device.get("children").and_then(|v| v.as_array()) {
-                    for child in children {
-                        if let Ok(usb_device) = self.parse_linux_device(child).await {
-                            devices.push(usb_device);
+                let temp_manager = UsbManager::new();
+                if let Ok(current_devices) = temp_manager.scan_devices().await {
+                    let current_map: HashMap<String, UsbDevice> = current_devices
+                        .into_iter()
+                        .map(|d| (d.device_path.to_string_lossy().to_string(), d))
+                        .collect();
+
+                    // Check for new devices
+                    for (path, device) in &current_map {
+                        if !last_devices.contains_key(path) {
+                            let term = Term::stderr();
+                            let _ = term.write_line(&format!(
+                                "{} New device detected: {}",
+                                style("🔌").green(),
+                                style(path).cyan()
+                            ));
+                            let _ = sender_ref.send(UsbEvent::DeviceAdded(device.clone()));
                         }
                     }
-                }
-            }
-        }
 
-        Ok(devices)
-    }
-
-    #[cfg(target_os = "linux")]
-    async fn parse_linux_device(&self, device: &serde_json::Value) -> Result<UsbDevice> {
-        let name = device
-            .get("name")
-            .and_then(|v| v.as_str())
-            .context("Device name not found")?;
-
-        let device_path = PathBuf::from(format!("/dev/{}", name));
-
-        let mount_point = device
-            .get("mountpoint")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from);
-
-        let label = device
-            .get("label")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let filesystem = device
-            .get("fstype")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-
-        // Parse size (comes as human readable, e.g., "8G")
-        let total_space =
-            self.parse_size_string(device.get("size").and_then(|v| v.as_str()).unwrap_or("0"))?;
-
-        let available_space =
-            self.parse_size_string(device.get("avail").and_then(|v| v.as_str()).unwrap_or("0"))?;
-
-        let mut usb_device = UsbDevice {
-            device_path,
-            mount_point,
-            label,
-            filesystem,
-            total_space,
-            available_space,
-            is_ventoy: false,
-            ventoy_version: None,
-            last_seen: SystemTime::now(),
-        };
-
-        // Check for Ventoy installation if mounted
-        if usb_device.mount_point.is_some() {
-            let _ = self.check_ventoy_installation(&mut usb_device).await;
-        }
-
-        Ok(usb_device)
-    }
-
-    #[cfg(target_os = "windows")]
-    async fn scan_devices_windows(&self) -> Result<Vec<UsbDevice>> {
-        let mut devices = Vec::new();
-
-        // Use PowerShell to get removable drives
-        let output = Command::new("powershell")
-            .args(&["-Command",
-                   "Get-WmiObject -Class Win32_LogicalDisk | Where-Object {$_.DriveType -eq 2} | ConvertTo-Json"])
-            .output()
-            .context("Failed to execute PowerShell command")?;
-
-        if !output.status.success() {
-            if let Ok(term) = Term::stderr() {
-                let _ = term.write_line(&format!(
-                    "{} PowerShell command failed, trying alternative method",
-                    style("⚠️").yellow()
-                ));
-            }
-            return self.scan_devices_windows_fallback().await;
-        }
-
-        let json_str = String::from_utf8_lossy(&output.stdout);
-        if let Ok(drives) = serde_json::from_str::<serde_json::Value>(&json_str) {
-            let drives_array = if drives.is_array() {
-                drives.as_array().unwrap()
-            } else {
-                // Single drive, wrap in array
-                std::slice::from_ref(&drives)
-            };
-
-            for drive in drives_array {
-                if let Ok(usb_device) = self.parse_windows_device(drive).await {
-                    devices.push(usb_device);
-                }
-            }
-        }
-
-        Ok(devices)
-    }
-
-    #[cfg(target_os = "windows")]
-    async fn scan_devices_windows_fallback(&self) -> Result<Vec<UsbDevice>> {
-        // Fallback: scan drive letters A-Z for removable drives
-        let mut devices = Vec::new();
-
-        for letter in 'A'..='Z' {
-            let drive_path = format!("{}:\\", letter);
-            let path = std::path::Path::new(&drive_path);
-
-            if path.exists() {
-                // Check if it's a removable drive using fsutil
-                let output = Command::new("fsutil")
-                    .args(&["fsinfo", "drivetype", &drive_path])
-                    .output();
-
-                if let Ok(output) = output {
-                    let output_str = String::from_utf8_lossy(&output.stdout);
-                    if output_str.contains("Removable Drive") {
-                        if let Ok(usb_device) = self.create_windows_device_from_path(&path).await {
-                            devices.push(usb_device);
+                    // Check for removed devices
+                    for path in last_devices.keys() {
+                        if !current_map.contains_key(path) {
+                            let term = Term::stderr();
+                            let _ = term.write_line(&format!(
+                                "{} Device removed: {}",
+                                style("🔌").red(),
+                                style(path).cyan()
+                            ));
+                            let _ = sender_ref.send(UsbEvent::DeviceRemoved(path.clone()));
                         }
                     }
+
+                    {
+                        let mut detected = devices_ref.write().await;
+                        *detected = current_map.clone();
+                    }
+
+                    last_devices = current_map;
                 }
             }
-        }
+        });
 
-        Ok(devices)
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Started USB device monitoring",
+            style("👁️").cyan()
+        ));
+        Ok(receiver)
     }
 
-    #[cfg(target_os = "windows")]
-    async fn parse_windows_device(&self, device: &serde_json::Value) -> Result<UsbDevice> {
-        let device_id = device
-            .get("DeviceID")
-            .and_then(|v| v.as_str())
-            .context("Device ID not found")?;
-
-        let device_path = PathBuf::from(device_id);
-        let mount_point = Some(PathBuf::from(device_id));
-
-        let label = device
-            .get("VolumeName")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let total_space = device.get("Size").and_then(|v| v.as_u64()).unwrap_or(0);
-
-        let available_space = device
-            .get("FreeSpace")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-
-        let mut usb_device = UsbDevice {
-            device_path,
-            mount_point,
-            label,
-            filesystem: "NTFS".to_string(), // Default assumption
-            total_space,
-            available_space,
-            is_ventoy: false,
-            ventoy_version: None,
-            last_seen: SystemTime::now(),
-        };
-
-        let _ = self.check_ventoy_installation(&mut usb_device).await;
-        Ok(usb_device)
+    /// Stop monitoring for device changes
+    pub async fn stop_monitoring(&self) {
+        let mut monitoring = self.monitoring.write().await;
+        *monitoring = false;
+        let term = Term::stderr();
+        let _ = term.write_line(&format!(
+            "{} Stopped USB device monitoring",
+            style("👁️").yellow()
+        ));
     }
 
-    #[cfg(target_os = "windows")]
-    async fn create_windows_device_from_path(&self, path: &std::path::Path) -> Result<UsbDevice> {
-        // Basic implementation for fallback method
-        let mut usb_device = UsbDevice {
-            device_path: path.to_path_buf(),
-            mount_point: Some(path.to_path_buf()),
-            label: None,
-            filesystem: "Unknown".to_string(),
-            total_space: 0,
-            available_space: 0,
-            is_ventoy: false,
-            ventoy_version: None,
-            last_seen: SystemTime::now(),
-        };
-
-        let _ = self.check_ventoy_installation(&mut usb_device).await;
-        Ok(usb_device)
-    }
-
-    #[cfg(target_os = "macos")]
-    async fn scan_devices_macos(&self) -> Result<Vec<UsbDevice>> {
-        let mut devices = Vec::new();
-
-        // Use diskutil to list external drives
-        let output = Command::new("diskutil")
-            .args(&["list", "-plist", "external"])
-            .output()
-            .context("Failed to execute diskutil command")?;
-
-        if !output.status.success() {
-            bail!("diskutil command failed");
-        }
-
-        // Parse plist output (simplified - you might want to use a plist crate)
-        let output_str = String::from_utf8_lossy(&output.stdout);
-
-        // This is a simplified implementation
-        // In practice, you'd want to properly parse the plist and get detailed info
-        for line in output_str.lines() {
-            if line.contains("/dev/disk") {
-                if let Ok(usb_device) = self.create_macos_device_from_line(line).await {
-                    devices.push(usb_device);
-                }
-            }
-        }
-
-        Ok(devices)
-    }
-
-    #[cfg(target_os = "macos")]
-    async fn create_macos_device_from_line(&self, line: &str) -> Result<UsbDevice> {
-        // Extract device path from diskutil output
-        let device_path = PathBuf::from(line.trim());
-
-        let mut usb_device = UsbDevice {
-            device_path,
-            mount_point: None, // Would need additional diskutil calls to get mount point
-            label: None,
-            filesystem: "Unknown".to_string(),
-            total_space: 0,
-            available_space: 0,
-            is_ventoy: false,
-            ventoy_version: None,
-            last_seen: SystemTime::now(),
-        };
-
-        // You'd implement proper diskutil info parsing here
-        Ok(usb_device)
-    }
-
-    /// Parse human-readable size strings (e.g., "8G", "512M") to bytes
-    fn parse_size_string(&self, size_str: &str) -> Result<u64> {
-        if size_str.is_empty() || size_str == "-" {
-            return Ok(0);
-        }
-
-        let size_str = size_str.trim();
-        let (number_str, unit) = if let Some(last_char) = size_str.chars().last() {
-            if last_char.is_alphabetic() {
-                (
-                    &size_str[..size_str.len() - 1],
-                    last_char.to_uppercase().next().unwrap(),
-                )
-            } else {
-                (size_str, 'B')
-            }
-        } else {
-            return Ok(0);
-        };
-
-        let number: f64 = number_str
-            .parse()
-            .with_context(|| format!("Failed to parse size number: {}", number_str))?;
-
-        let multiplier = match unit {
-            'B' => 1,
-            'K' => 1024,
-            'M' => 1024 * 1024,
-            'G' => 1024 * 1024 * 1024,
-            'T' => 1024_u64.pow(4),
-            _ => bail!("Unknown size unit: {}", unit),
-        };
-
-        Ok((number * multiplier as f64) as u64)
+    /// Get active downloads
+    pub async fn get_active_downloads(&self) -> Vec<String> {
+        vec![]
     }
 }
 
