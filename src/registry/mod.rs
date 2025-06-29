@@ -4,11 +4,13 @@ pub mod version_detection;
 
 use anyhow::{Context, Result, bail};
 use console::{Term, style};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 
-pub use sources::{DownloadSource, SourcePriority, SourceType};
+pub use sources::DownloadSource;
 pub use version_detection::{ReleaseType, VersionDetector, VersionInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,13 +46,21 @@ pub struct DistroDefinition {
 pub struct IsoRegistry {
     distros: HashMap<String, DistroDefinition>,
     custom_distros: HashMap<String, DistroDefinition>,
+    http_client: Client,
 }
 
 impl IsoRegistry {
     pub fn new() -> Self {
+        let http_client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("isod/0.1.0")
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
         let mut registry = Self {
             distros: HashMap::new(),
             custom_distros: HashMap::new(),
+            http_client,
         };
 
         // Load built-in distro definitions
@@ -127,11 +137,22 @@ impl IsoRegistry {
     pub async fn get_latest_version(&self, distro: &str) -> Result<VersionInfo> {
         let versions = self.get_available_versions(distro).await?;
 
+        // Try to find stable/LTS versions first
+        let stable_version = versions
+            .iter()
+            .filter(|v| matches!(v.release_type, ReleaseType::Stable | ReleaseType::LTS))
+            .max_by(|a, b| a.cmp(b))
+            .cloned();
+
+        if let Some(version) = stable_version {
+            return Ok(version);
+        }
+
+        // Fallback to any version if no stable versions found
         versions
             .into_iter()
-            .filter(|v| v.release_type == ReleaseType::Stable)
-            .max_by(|a, b| a.version.cmp(&b.version))
-            .with_context(|| format!("No stable versions found for {}", distro))
+            .max_by(|a, b| a.cmp(b))
+            .context("No versions found")
     }
 
     /// Get ISO information for a specific distro/version/arch/variant combination
@@ -336,7 +357,7 @@ impl IsoRegistry {
         Ok(resolved_sources)
     }
 
-    /// Get checksum for an ISO
+    /// Get checksum for an ISO with actual HTTP fetching
     pub async fn get_checksum(&self, iso_info: &IsoInfo) -> Result<Option<String>> {
         let definition = self
             .get_distro(&iso_info.distro)
@@ -360,20 +381,68 @@ impl IsoRegistry {
             }
         }
 
-        let term = Term::stderr();
-        let _ = term.write_line(&format!(
-            "{} No checksum found for {}",
-            style("⚠️").yellow(),
-            iso_info.filename
-        ));
         Ok(None)
     }
 
-    /// Fetch checksum from a URL
-    async fn fetch_checksum(&self, _url: &str, _filename: &str) -> Result<String> {
-        // This would use reqwest to fetch the checksum file
-        // For now, just return an error to indicate implementation needed
-        bail!("Checksum fetching not yet implemented for URL: {}", _url);
+    /// Fetch checksum from a URL with actual HTTP implementation
+    async fn fetch_checksum(&self, url: &str, filename: &str) -> Result<String> {
+        let response = self
+            .http_client
+            .get(url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to fetch checksum from: {}", url))?;
+
+        if !response.status().is_success() {
+            bail!("HTTP request failed with status: {}", response.status());
+        }
+
+        let content = response
+            .text()
+            .await
+            .context("Failed to read checksum response as text")?;
+
+        // Parse checksum file formats (SHA256SUMS, MD5SUMS, etc.)
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Handle different checksum file formats:
+            // Format 1: "checksum filename" (space separated)
+            // Format 2: "checksum *filename" (binary mode indicator)
+            // Format 3: "checksum  filename" (double space)
+
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let checksum = parts[0];
+                let file_in_line = parts[1].trim_start_matches('*'); // Remove binary mode indicator
+
+                // Check if this line contains our filename
+                if file_in_line == filename || file_in_line.ends_with(filename) {
+                    // Validate checksum format (should be hex)
+                    if checksum.chars().all(|c| c.is_ascii_hexdigit()) {
+                        return Ok(checksum.to_lowercase());
+                    }
+                }
+            }
+
+            // Alternative format: "filename: checksum"
+            if let Some(colon_pos) = line.find(':') {
+                let (file_part, checksum_part) = line.split_at(colon_pos);
+                let file_part = file_part.trim();
+                let checksum = checksum_part[1..].trim(); // Remove the colon
+
+                if (file_part == filename || file_part.ends_with(filename))
+                    && checksum.chars().all(|c| c.is_ascii_hexdigit())
+                {
+                    return Ok(checksum.to_lowercase());
+                }
+            }
+        }
+
+        bail!("Checksum for '{}' not found in checksum file", filename);
     }
 }
 

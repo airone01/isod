@@ -10,10 +10,6 @@ pub mod sync;
 pub mod update;
 
 use crate::cli::{Commands, ConfigAction};
-use crate::config::ConfigManager;
-use crate::registry::IsoRegistry;
-use crate::usb::UsbManager;
-use anyhow::Result;
 
 // Re-export all handlers
 pub use add::handle_add;

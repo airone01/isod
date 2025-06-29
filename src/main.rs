@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod download;
 mod handlers;
 mod registry;
 mod usb;
@@ -293,5 +294,18 @@ mod tests {
             .get_iso_info("nonexistent-distro", None, None, None)
             .await;
         assert!(result.is_err(), "Should fail for unsupported distro");
+    }
+
+    #[tokio::test]
+    async fn test_download_system() {
+        use crate::download::{DownloadManager, DownloadOptions};
+
+        // Test that download manager can be created
+        let options = DownloadOptions::default();
+        let result = DownloadManager::new(options);
+        assert!(
+            result.is_ok(),
+            "Download manager should initialize successfully"
+        );
     }
 }

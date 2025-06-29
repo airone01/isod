@@ -13,17 +13,28 @@ keywords = ["cli", "rust"]
 [dependencies]
 anyhow = "1.0.98"
 async-trait = "0.1.88"
+chrono = { version = "0.4.41", features = ["serde"] }
 clap = { version = "4.5.40", features = ["derive"] }
 console = "0.16.0"
 dialoguer = "0.11.0"
+digest = "0.10.7"
 directories = "6.0.0"
+futures-util = "0.3.31"
 indicatif = "0.17.11"
+md5 = "0.8.0"
+regex = "1.11.1"
 reqwest = { version = "0.12.20", features = ["json", "stream"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+sha1 = "0.10.6"
 sha2 = "0.10.9"
 thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = ["full"] }
 toml = "0.8.23"
 usbenum = "0.1.0"
+uuid = { version = "1.17.0", features = ["v4"] }
 walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3.20.0"
+tokio-test = "0.4.4"

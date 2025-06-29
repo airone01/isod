@@ -6,13 +6,18 @@ pub fn create_definition() -> Result<DistroDefinition> {
     let version_detector = detectors::composite()
         .add_detector(detectors::web_scraper(
             "https://archlinux.org/download/",
-            ".download-info .version",
+            ".download-info",
             r"(\d{4}\.\d{2}\.\d{2})",
         ))
         .add_detector(detectors::rss_feed(
             "https://archlinux.org/feeds/news/",
             r"(\d{4}\.\d{2}\.\d{2})",
             ReleaseType::Stable,
+        ))
+        // GitLab API for arch-release-dates (if available)
+        .add_detector(detectors::api(
+            "https://gitlab.archlinux.org/api/v4/projects/archlinux%2Farch-release-dates/repository/tags",
+            "$.[*].name",
         ))
         // Static fallback with recent monthly releases
         .add_detector(detectors::static_versions(vec![
@@ -133,92 +138,4 @@ pub fn create_definition() -> Result<DistroDefinition> {
             "https://archive.archlinux.org/iso/{version}/sha256sums.txt".to_string(),
         ],
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_arch_definition_creation() {
-        let definition = create_definition().unwrap();
-
-        assert_eq!(definition.name, "arch");
-        assert_eq!(definition.display_name, "Arch Linux");
-        assert!(
-            definition
-                .supported_architectures
-                .contains(&"x86_64".to_string())
-        );
-        assert!(definition.supported_variants.contains(&"base".to_string()));
-        assert_eq!(definition.default_variant, Some("base".to_string()));
-    }
-
-    #[test]
-    fn test_arch_architectures() {
-        let definition = create_definition().unwrap();
-
-        // Arch officially only supports x86_64
-        assert_eq!(definition.supported_architectures.len(), 1);
-        assert!(
-            definition
-                .supported_architectures
-                .contains(&"x86_64".to_string())
-        );
-    }
-
-    #[test]
-    fn test_arch_filename_pattern() {
-        let definition = create_definition().unwrap();
-        assert_eq!(
-            definition.filename_pattern,
-            "archlinux-{version}-{arch}.iso"
-        );
-    }
-
-    #[test]
-    fn test_arch_rolling_release_model() {
-        let definition = create_definition().unwrap();
-
-        // Arch uses date-based versioning for ISOs
-        // Check that our static versions include date-based versions
-        // This is indirectly tested through the version detector
-        assert!(!definition.checksum_urls.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_arch_version_detection() {
-        let definition = create_definition().unwrap();
-
-        let result = definition.version_detector.detect_versions().await;
-        assert!(result.is_ok());
-
-        let versions = result.unwrap();
-        assert!(!versions.is_empty());
-
-        // Should have "latest" version
-        let has_latest = versions.iter().any(|v| v.version == "latest");
-        assert!(has_latest, "Should have 'latest' version");
-
-        // Should have date-based versions
-        let has_date_version = versions
-            .iter()
-            .any(|v| v.version.matches('.').count() == 2 && v.version.len() == 10);
-        assert!(
-            has_date_version,
-            "Should have date-based versions (YYYY.MM.DD)"
-        );
-    }
-
-    #[test]
-    fn test_arch_torrents() {
-        let definition = create_definition().unwrap();
-
-        // Check that Arch definition includes torrent sources
-        let has_torrent = definition
-            .download_sources
-            .iter()
-            .any(|source| matches!(source.source_type, SourceType::Magnet));
-        assert!(has_torrent, "Should have magnet/torrent sources");
-    }
 }

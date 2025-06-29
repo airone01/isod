@@ -1,8 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReleaseType {
@@ -185,20 +187,68 @@ pub struct FeedVersionDetector {
     pub feed_url: String,
     pub version_regex: String,
     pub release_type: ReleaseType,
+    client: Client,
+}
+
+impl FeedVersionDetector {
+    pub fn new(feed_url: String, version_regex: String, release_type: ReleaseType) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("isod/0.1.0")
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        Self {
+            feed_url,
+            version_regex,
+            release_type,
+            client,
+        }
+    }
 }
 
 #[async_trait]
 impl VersionDetector for FeedVersionDetector {
     async fn detect_versions(&self) -> Result<Vec<VersionInfo>> {
-        // TODO: Implement RSS/Atom feed parsing
-        // This would use a feed parsing library to extract version information
-        // from RSS feeds like Ubuntu's or Fedora's release announcements
+        let response = self
+            .client
+            .get(&self.feed_url)
+            .send()
+            .await
+            .context("Failed to fetch RSS feed")?;
 
-        // Placeholder implementation
-        Ok(vec![
-            VersionInfo::new("placeholder", self.release_type.clone())
-                .with_release_date("2024-01-01"),
-        ])
+        if !response.status().is_success() {
+            bail!("RSS feed request failed with status: {}", response.status());
+        }
+
+        let content = response
+            .text()
+            .await
+            .context("Failed to read RSS feed content")?;
+
+        // Simple RSS parsing - look for version patterns in the content
+        let regex =
+            regex::Regex::new(&self.version_regex).context("Invalid version regex pattern")?;
+
+        let mut versions = Vec::new();
+        let mut seen_versions = std::collections::HashSet::new();
+
+        for captures in regex.captures_iter(&content) {
+            if let Some(version_match) = captures.get(1) {
+                let version = version_match.as_str().to_string();
+                if seen_versions.insert(version.clone()) {
+                    versions.push(VersionInfo::new(&version, self.release_type.clone()));
+                }
+            }
+        }
+
+        // Sort versions (newest first)
+        versions.sort_by(|a, b| b.cmp(a));
+
+        // Limit to 20 most recent versions
+        versions.truncate(20);
+
+        Ok(versions)
     }
 }
 
@@ -209,19 +259,121 @@ pub struct GitHubVersionDetector {
     pub repo_name: String,
     pub version_prefix: Option<String>,
     pub include_prereleases: bool,
+    client: Client,
+}
+
+impl GitHubVersionDetector {
+    pub fn new(repo_owner: String, repo_name: String, include_prereleases: bool) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("isod/0.1.0")
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        Self {
+            repo_owner,
+            repo_name,
+            version_prefix: None,
+            include_prereleases,
+            client,
+        }
+    }
+
+    pub fn with_version_prefix(mut self, prefix: String) -> Self {
+        self.version_prefix = Some(prefix);
+        self
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    name: Option<String>,
+    published_at: Option<String>,
+    prerelease: bool,
+    draft: bool,
 }
 
 #[async_trait]
 impl VersionDetector for GitHubVersionDetector {
     async fn detect_versions(&self) -> Result<Vec<VersionInfo>> {
-        // TODO: Implement GitHub API integration
-        // This would use the GitHub API to fetch releases from a repository
-        // https://api.github.com/repos/{owner}/{repo}/releases
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases",
+            self.repo_owner, self.repo_name
+        );
 
-        // Placeholder implementation
-        Ok(vec![
-            VersionInfo::new("v1.0.0", ReleaseType::Stable).with_release_date("2024-01-01"),
-        ])
+        let response = self
+            .client
+            .get(&url)
+            .header("Accept", "application/vnd.github.v3+json")
+            .send()
+            .await
+            .context("Failed to fetch GitHub releases")?;
+
+        if !response.status().is_success() {
+            bail!(
+                "GitHub API request failed with status: {}",
+                response.status()
+            );
+        }
+
+        let releases: Vec<GitHubRelease> = response
+            .json()
+            .await
+            .context("Failed to parse GitHub releases JSON")?;
+
+        let mut versions = Vec::new();
+
+        for release in releases {
+            if release.draft {
+                continue;
+            }
+
+            if release.prerelease && !self.include_prereleases {
+                continue;
+            }
+
+            let mut version = release.tag_name.clone();
+
+            // Remove version prefix if specified
+            if let Some(prefix) = &self.version_prefix {
+                if version.starts_with(prefix) {
+                    version = version[prefix.len()..].to_string();
+                }
+            }
+
+            // Remove common prefixes
+            if version.starts_with('v') {
+                version = version[1..].to_string();
+            }
+
+            let release_type = if release.prerelease {
+                if version.contains("rc") {
+                    ReleaseType::RC
+                } else if version.contains("beta") {
+                    ReleaseType::Beta
+                } else if version.contains("alpha") {
+                    ReleaseType::Alpha
+                } else {
+                    ReleaseType::Beta
+                }
+            } else {
+                ReleaseType::Stable
+            };
+
+            let mut version_info = VersionInfo::new(&version, release_type);
+
+            if let Some(published_at) = release.published_at {
+                // Extract date from ISO format (2023-04-18T10:30:00Z)
+                if let Some(date_part) = published_at.split('T').next() {
+                    version_info = version_info.with_release_date(date_part);
+                }
+            }
+
+            versions.push(version_info);
+        }
+
+        Ok(versions)
     }
 }
 
@@ -233,17 +385,67 @@ pub struct WebScrapingDetector {
     pub version_regex: String,    // Regex to extract version from text
     pub date_selector: Option<String>,
     pub date_format: Option<String>,
+    client: Client,
+}
+
+impl WebScrapingDetector {
+    pub fn new(base_url: String, version_selector: String, version_regex: String) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("isod/0.1.0")
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        Self {
+            base_url,
+            version_selector,
+            version_regex,
+            date_selector: None,
+            date_format: None,
+            client,
+        }
+    }
 }
 
 #[async_trait]
 impl VersionDetector for WebScrapingDetector {
     async fn detect_versions(&self) -> Result<Vec<VersionInfo>> {
-        // TODO: Implement web scraping with HTML parsing
-        // This would fetch HTML pages and extract version information
-        // using CSS selectors or XPath expressions
+        let response = self
+            .client
+            .get(&self.base_url)
+            .send()
+            .await
+            .context("Failed to fetch web page")?;
 
-        // Placeholder implementation
-        Ok(vec![VersionInfo::new("scraped-1.0", ReleaseType::Stable)])
+        if !response.status().is_success() {
+            bail!("Web request failed with status: {}", response.status());
+        }
+
+        let content = response
+            .text()
+            .await
+            .context("Failed to read web page content")?;
+
+        // Simple regex-based extraction
+        let regex =
+            regex::Regex::new(&self.version_regex).context("Invalid version regex pattern")?;
+
+        let mut versions = Vec::new();
+        let mut seen_versions = std::collections::HashSet::new();
+
+        for captures in regex.captures_iter(&content) {
+            if let Some(version_match) = captures.get(1) {
+                let version = version_match.as_str().to_string();
+                if seen_versions.insert(version.clone()) {
+                    versions.push(VersionInfo::new(&version, ReleaseType::Stable));
+                }
+            }
+        }
+
+        // Sort versions (newest first)
+        versions.sort_by(|a, b| b.cmp(a));
+
+        Ok(versions)
     }
 }
 
@@ -254,17 +456,71 @@ pub struct ApiVersionDetector {
     pub auth_header: Option<String>,
     pub version_json_path: String, // JSONPath to version field
     pub date_json_path: Option<String>,
+    client: Client,
+}
+
+impl ApiVersionDetector {
+    pub fn new(api_url: String, version_json_path: String) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .user_agent("isod/0.1.0")
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        Self {
+            api_url,
+            auth_header: None,
+            version_json_path,
+            date_json_path: None,
+            client,
+        }
+    }
 }
 
 #[async_trait]
 impl VersionDetector for ApiVersionDetector {
     async fn detect_versions(&self) -> Result<Vec<VersionInfo>> {
-        // TODO: Implement API-based version detection
-        // This would make HTTP requests to distribution APIs
-        // and parse JSON responses to extract version information
+        let mut request = self.client.get(&self.api_url);
 
-        // Placeholder implementation
-        Ok(vec![VersionInfo::new("api-1.0", ReleaseType::Stable)])
+        if let Some(auth) = &self.auth_header {
+            request = request.header("Authorization", auth);
+        }
+
+        let response = request.send().await.context("Failed to fetch API data")?;
+
+        if !response.status().is_success() {
+            bail!("API request failed with status: {}", response.status());
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse API JSON response")?;
+
+        // Simple JSONPath-like extraction
+        let mut versions = Vec::new();
+
+        // For now, implement basic JSON traversal
+        if let Some(array) = json.as_array() {
+            for item in array {
+                if let Some(version_str) = self.extract_json_value(item, &self.version_json_path) {
+                    versions.push(VersionInfo::new(&version_str, ReleaseType::Stable));
+                }
+            }
+        }
+
+        Ok(versions)
+    }
+}
+
+impl ApiVersionDetector {
+    fn extract_json_value(&self, json: &serde_json::Value, path: &str) -> Option<String> {
+        // Simple implementation - just handle basic object property access
+        if let Some(field_name) = path.strip_prefix("$.") {
+            json.get(field_name)?.as_str().map(|s| s.to_string())
+        } else {
+            None
+        }
     }
 }
 
@@ -338,12 +594,11 @@ pub mod detectors {
 
     /// Create a GitHub releases detector
     pub fn github(owner: &str, repo: &str, include_prereleases: bool) -> Box<dyn VersionDetector> {
-        Box::new(GitHubVersionDetector {
-            repo_owner: owner.to_string(),
-            repo_name: repo.to_string(),
-            version_prefix: None,
+        Box::new(GitHubVersionDetector::new(
+            owner.to_string(),
+            repo.to_string(),
             include_prereleases,
-        })
+        ))
     }
 
     /// Create an RSS feed detector
@@ -352,11 +607,11 @@ pub mod detectors {
         version_regex: &str,
         release_type: ReleaseType,
     ) -> Box<dyn VersionDetector> {
-        Box::new(FeedVersionDetector {
-            feed_url: feed_url.to_string(),
-            version_regex: version_regex.to_string(),
+        Box::new(FeedVersionDetector::new(
+            feed_url.to_string(),
+            version_regex.to_string(),
             release_type,
-        })
+        ))
     }
 
     /// Create a web scraping detector
@@ -365,23 +620,19 @@ pub mod detectors {
         version_selector: &str,
         version_regex: &str,
     ) -> Box<dyn VersionDetector> {
-        Box::new(WebScrapingDetector {
-            base_url: base_url.to_string(),
-            version_selector: version_selector.to_string(),
-            version_regex: version_regex.to_string(),
-            date_selector: None,
-            date_format: None,
-        })
+        Box::new(WebScrapingDetector::new(
+            base_url.to_string(),
+            version_selector.to_string(),
+            version_regex.to_string(),
+        ))
     }
 
     /// Create an API detector
     pub fn api(api_url: &str, version_json_path: &str) -> Box<dyn VersionDetector> {
-        Box::new(ApiVersionDetector {
-            api_url: api_url.to_string(),
-            auth_header: None,
-            version_json_path: version_json_path.to_string(),
-            date_json_path: None,
-        })
+        Box::new(ApiVersionDetector::new(
+            api_url.to_string(),
+            version_json_path.to_string(),
+        ))
     }
 
     /// Create a static detector with predefined versions

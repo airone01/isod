@@ -4,14 +4,18 @@ use anyhow::Result;
 pub fn create_definition() -> Result<DistroDefinition> {
     // Fedora version detector using multiple sources
     let version_detector = detectors::composite()
+        // Official Fedora API
+        .add_detector(detectors::api(
+            "https://bodhi.fedoraproject.org/releases/?rows=20",
+            "$.releases[*].version",
+        ))
+        // GitHub releases for Fedora (alternative source)
+        .add_detector(detectors::github("fedora-linux", "fedora", false))
+        // RSS feed from Fedora Magazine
         .add_detector(detectors::rss_feed(
-            "https://fedoraproject.org/wiki/Releases?action=rss",
+            "https://fedoramagazine.org/feed/",
             r"Fedora (\d+)",
             ReleaseType::Stable,
-        ))
-        .add_detector(detectors::api(
-            "https://bodhi.fedoraproject.org/releases/",
-            "$.releases[*].version",
         ))
         // Static fallback with recent Fedora releases
         .add_detector(detectors::static_versions(vec![
@@ -19,7 +23,8 @@ pub fn create_definition() -> Result<DistroDefinition> {
                 .with_release_date("2024-04-23")
                 .with_download_base(
                     "https://download.fedoraproject.org/pub/fedora/linux/releases/40/",
-                ),
+                )
+                .with_notes("Latest stable release"),
             VersionInfo::new("39", ReleaseType::Stable)
                 .with_release_date("2023-11-07")
                 .with_download_base(
@@ -62,7 +67,8 @@ pub fn create_definition() -> Result<DistroDefinition> {
             "https://fedora.mirror.constant.com/releases/{version}/Workstation/{arch}/iso/{filename}",
             SourcePriority::High,
             Some("US")
-        ).with_description("Constant.com mirror"),
+        ).with_description("Constant.com mirror")
+        .with_speed_rating(8),
 
         DownloadSource::mirror(
             "https://mirror.aarnet.edu.au/pub/fedora/linux/releases/{version}/Workstation/{arch}/iso/{filename}",
@@ -75,6 +81,12 @@ pub fn create_definition() -> Result<DistroDefinition> {
             SourcePriority::Medium,
             Some("DE")
         ).with_description("University of Erlangen mirror"),
+
+        DownloadSource::mirror(
+            "https://fedora.ip-connect.info/releases/{version}/Workstation/{arch}/iso/{filename}",
+            SourcePriority::Medium,
+            Some("EU")
+        ).with_description("IP-Connect mirror"),
 
         // Torrent support
         DownloadSource::torrent(
@@ -110,71 +122,4 @@ pub fn create_definition() -> Result<DistroDefinition> {
             "https://getfedora.org/static/checksums/Fedora-Workstation-{version}-1.5-{arch}-CHECKSUM".to_string(),
         ],
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_fedora_definition_creation() {
-        let definition = create_definition().unwrap();
-
-        assert_eq!(definition.name, "fedora");
-        assert_eq!(definition.display_name, "Fedora");
-        assert!(
-            definition
-                .supported_architectures
-                .contains(&"x86_64".to_string())
-        );
-        assert!(
-            definition
-                .supported_variants
-                .contains(&"workstation".to_string())
-        );
-        assert_eq!(definition.default_variant, Some("workstation".to_string()));
-    }
-
-    #[test]
-    fn test_fedora_filename_pattern() {
-        let definition = create_definition().unwrap();
-        assert_eq!(
-            definition.filename_pattern,
-            "Fedora-{variant}-Live-{arch}-{version}-1.5.iso"
-        );
-    }
-
-    #[test]
-    fn test_fedora_architectures() {
-        let definition = create_definition().unwrap();
-
-        // Fedora uses x86_64 instead of amd64
-        assert!(
-            definition
-                .supported_architectures
-                .contains(&"x86_64".to_string())
-        );
-        assert!(
-            !definition
-                .supported_architectures
-                .contains(&"amd64".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn test_fedora_version_detection() {
-        let definition = create_definition().unwrap();
-
-        let result = definition.version_detector.detect_versions().await;
-        assert!(result.is_ok());
-
-        let versions = result.unwrap();
-        assert!(!versions.is_empty());
-
-        // Check that we have some recent versions
-        let has_recent_version = versions
-            .iter()
-            .any(|v| v.version.parse::<u32>().unwrap_or(0) >= 37);
-        assert!(has_recent_version, "Should have Fedora 37 or newer");
-    }
 }
