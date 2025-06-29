@@ -1,8 +1,8 @@
 use crate::cli::ConfigAction;
-use crate::config::ConfigManager;
 use anyhow::Result;
 use console::{Term, style};
 use dialoguer::Confirm;
+use isod::config::ConfigManager;
 use std::process;
 
 pub async fn handle_config(

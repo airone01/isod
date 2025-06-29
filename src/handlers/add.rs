@@ -1,7 +1,7 @@
-use crate::config::ConfigManager;
-use crate::registry::IsoRegistry;
 use anyhow::Result;
 use console::{Term, style};
+use isod::config::ConfigManager;
+use isod::registry::IsoRegistry;
 use std::process;
 
 pub async fn handle_add(

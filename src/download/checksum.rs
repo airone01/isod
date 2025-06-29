@@ -68,7 +68,7 @@ impl ChecksumVerifier {
                     }
                     context.consume(&buffer[..bytes_read]);
                 }
-                let digest = context.compute();
+                let digest = context.finalize();
                 Ok(format!("{:x}", digest))
             }
             ChecksumType::Sha1 => {

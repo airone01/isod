@@ -1,9 +1,9 @@
-use crate::config::ConfigManager;
-use crate::registry::IsoRegistry;
-use crate::usb::UsbManager;
 use anyhow::Result;
 use console::{Term, style};
 use indicatif::{ProgressBar, ProgressStyle};
+use isod::config::ConfigManager;
+use isod::registry::IsoRegistry;
+use isod::usb::UsbManager;
 use std::time::Duration;
 
 pub async fn handle_list(

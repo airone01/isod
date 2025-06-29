@@ -1,7 +1,7 @@
-use crate::config::ConfigManager;
-use crate::usb::UsbManager;
 use anyhow::Result;
 use console::{Term, style};
+use isod::config::ConfigManager;
+use isod::usb::UsbManager;
 use std::process;
 
 pub async fn handle_clean(

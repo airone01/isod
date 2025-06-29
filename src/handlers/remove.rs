@@ -1,12 +1,12 @@
-use crate::config::ConfigManager;
-use crate::usb::UsbManager;
 use anyhow::Result;
 use console::{Term, style};
 use dialoguer::Confirm;
+use isod::config::ConfigManager;
+use isod::usb::UsbManager;
 use std::process;
 
 pub async fn handle_remove(
-    config_manager: &ConfigManager,
+    _config_manager: &ConfigManager,
     usb_manager: &UsbManager,
     distro: String,
     variant: Option<String>,

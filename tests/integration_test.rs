@@ -2,7 +2,7 @@ use anyhow::Result;
 use isod::download::{
     ChecksumType, DownloadManager, DownloadOptions, DownloadProgress, DownloadRequest,
 };
-use isod::registry::IsoRegistry;
+use isod::registry::{IsoRegistry, ReleaseType};
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -54,7 +54,7 @@ async fn test_version_detection() -> Result<()> {
     // Should have at least some LTS versions
     let has_lts = versions
         .iter()
-        .any(|v| matches!(v.release_type, isod::registry::ReleaseType::LTS));
+        .any(|v| matches!(v.release_type, ReleaseType::LTS));
     // Note: might not have LTS in test environment, so we don't assert this
 
     Ok(())

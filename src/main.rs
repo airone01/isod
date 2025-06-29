@@ -1,18 +1,13 @@
 mod cli;
-mod config;
-mod download;
 mod handlers;
-mod registry;
-mod usb;
 
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands};
-use config::ConfigManager;
 use console::{Term, style};
-use registry::IsoRegistry;
+use isod::usb::UsbManager;
+use isod::{ConfigManager, IsoRegistry};
 use std::process;
-use usb::UsbManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -298,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_download_system() {
-        use crate::download::{DownloadManager, DownloadOptions};
+        use isod::download::{DownloadManager, DownloadOptions};
 
         // Test that download manager can be created
         let options = DownloadOptions::default();

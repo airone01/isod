@@ -1,8 +1,8 @@
-use crate::download::{DownloadManager, DownloadOptions, DownloadProgress};
-use crate::registry::IsoRegistry;
 use anyhow::Result;
 use console::{Term, style};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use isod::download::{DownloadManager, DownloadOptions, DownloadProgress};
+use isod::registry::IsoRegistry;
 use std::process;
 use std::time::Duration;
 

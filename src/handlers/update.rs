@@ -1,9 +1,9 @@
-use crate::config::ConfigManager;
-use crate::download::{DownloadManager, DownloadOptions, DownloadProgress};
-use crate::registry::{IsoRegistry, ReleaseType};
 use anyhow::Result;
 use console::{Term, style};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use isod::config::ConfigManager;
+use isod::download::{DownloadManager, DownloadOptions, DownloadProgress};
+use isod::registry::{IsoRegistry, ReleaseType};
 use std::collections::HashMap;
 use std::process;
 use std::time::Duration;

@@ -6,59 +6,59 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Config {
+pub struct Config {
     #[serde(default)]
-    pub(crate) general: GeneralConfig,
+    pub general: GeneralConfig,
     #[serde(default)]
-    pub(crate) usb: UsbConfig,
+    pub usb: UsbConfig,
     #[serde(default)]
-    pub(crate) sources: SourcesConfig,
+    pub sources: SourcesConfig,
     #[serde(default)]
-    pub(crate) distros: HashMap<String, DistroConfig>,
+    pub distros: HashMap<String, DistroConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GeneralConfig {
+pub struct GeneralConfig {
     #[serde(default = "default_max_concurrent_downloads")]
-    pub(crate) max_concurrent_downloads: u8,
+    pub max_concurrent_downloads: u8,
     #[serde(default = "default_prefer_torrents")]
-    pub(crate) prefer_torrents: bool,
+    pub prefer_torrents: bool,
     #[serde(default = "default_auto_cleanup")]
-    pub(crate) auto_cleanup_old_versions: bool,
+    pub auto_cleanup_old_versions: bool,
     #[serde(default = "default_check_interval_days")]
-    pub(crate) check_interval_days: u32,
+    pub check_interval_days: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct UsbConfig {
+pub struct UsbConfig {
     #[serde(default)]
-    pub(crate) mount_point: Option<String>,
+    pub mount_point: Option<String>,
     #[serde(default = "default_iso_path")]
-    pub(crate) iso_path: String,
+    pub iso_path: String,
     #[serde(default = "default_metadata_file")]
-    pub(crate) metadata_file: String,
+    pub metadata_file: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SourcesConfig {
+pub struct SourcesConfig {
     #[serde(default = "default_enable_mirrors")]
-    pub(crate) enable_mirrors: bool,
+    pub enable_mirrors: bool,
     #[serde(default)]
-    pub(crate) custom_mirrors: Vec<String>,
+    pub custom_mirrors: Vec<String>,
     #[serde(default = "default_mirror_timeout_secs")]
-    pub(crate) mirror_timeout_secs: u64,
+    pub mirror_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct DistroConfig {
+pub struct DistroConfig {
     #[serde(default)]
-    pub(crate) variants: Vec<String>,
+    pub variants: Vec<String>,
     #[serde(default)]
-    pub(crate) architectures: Vec<String>,
+    pub architectures: Vec<String>,
     #[serde(default = "default_check_interval_days")]
-    pub(crate) check_interval_days: u32,
+    pub check_interval_days: u32,
     #[serde(default = "default_enabled")]
-    pub(crate) enabled: bool,
+    pub enabled: bool,
 }
 
 // Default value functions
@@ -164,7 +164,7 @@ impl Default for Config {
     }
 }
 
-pub(crate) struct ConfigManager {
+pub struct ConfigManager {
     config_dir: PathBuf,
     config_file: PathBuf,
     config: Config,
@@ -172,7 +172,7 @@ pub(crate) struct ConfigManager {
 
 impl ConfigManager {
     /// Create a new ConfigManager and load existing config or create default
-    pub(crate) fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let project_dirs =
             ProjectDirs::from("", "", "isod").context("Failed to determine config directory")?;
 
@@ -201,48 +201,48 @@ impl ConfigManager {
     }
 
     /// Get a reference to the current config
-    pub(crate) fn config(&self) -> &Config {
+    pub fn config(&self) -> &Config {
         &self.config
     }
 
     /// Get a mutable reference to the current config
-    pub(crate) fn config_mut(&mut self) -> &mut Config {
+    pub fn config_mut(&mut self) -> &mut Config {
         &mut self.config
     }
 
     /// Save the current config to disk
-    pub(crate) fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<()> {
         Self::save_config(&self.config_file, &self.config)
     }
 
     /// Reload config from disk
-    pub(crate) fn reload(&mut self) -> Result<()> {
+    pub fn reload(&mut self) -> Result<()> {
         self.config = Self::load_config(&self.config_file)?;
         Ok(())
     }
 
     /// Get the config directory path
-    pub(crate) fn config_dir(&self) -> &Path {
+    pub fn config_dir(&self) -> &Path {
         &self.config_dir
     }
 
     /// Get the config file path
-    pub(crate) fn config_file(&self) -> &Path {
+    pub fn config_file(&self) -> &Path {
         &self.config_file
     }
 
     /// Add or update a distro configuration
-    pub(crate) fn set_distro_config(&mut self, distro: String, config: DistroConfig) {
+    pub fn set_distro_config(&mut self, distro: String, config: DistroConfig) {
         self.config.distros.insert(distro, config);
     }
 
     /// Remove a distro configuration
-    pub(crate) fn remove_distro_config(&mut self, distro: &str) -> Option<DistroConfig> {
+    pub fn remove_distro_config(&mut self, distro: &str) -> Option<DistroConfig> {
         self.config.distros.remove(distro)
     }
 
     /// Get a distro configuration
-    pub(crate) fn get_distro_config(&self, distro: &str) -> Option<&DistroConfig> {
+    pub fn get_distro_config(&self, distro: &str) -> Option<&DistroConfig> {
         self.config.distros.get(distro)
     }
 
@@ -268,7 +268,7 @@ impl ConfigManager {
     }
 
     /// Create a sample config file for user reference
-    pub(crate) fn create_sample_config(&self) -> Result<PathBuf> {
+    pub fn create_sample_config(&self) -> Result<PathBuf> {
         let sample_file = self.config_dir.join("config.sample.toml");
         let sample_config = Config::default();
         Self::save_config(&sample_file, &sample_config)?;
@@ -276,7 +276,7 @@ impl ConfigManager {
     }
 
     /// Validate the current configuration
-    pub(crate) fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         // Validate general config
         if self.config.general.max_concurrent_downloads == 0 {
             anyhow::bail!("max_concurrent_downloads must be greater than 0");

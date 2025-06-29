@@ -1,7 +1,7 @@
-use crate::registry::IsoRegistry;
 use anyhow::Result;
 use console::{Term, style};
 use indicatif::{ProgressBar, ProgressStyle};
+use isod::registry::IsoRegistry;
 use std::process;
 use std::time::Duration;
 

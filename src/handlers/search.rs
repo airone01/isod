@@ -1,7 +1,7 @@
-use crate::registry::IsoRegistry;
 use anyhow::Result;
 use console::{Term, style};
 use indicatif::{ProgressBar, ProgressStyle};
+use isod::registry::IsoRegistry;
 use std::time::Duration;
 
 pub async fn handle_search(
