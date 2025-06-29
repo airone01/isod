@@ -18,10 +18,6 @@ Examples:
 ")]
 #[command(version)]
 pub struct Cli {
-    /// Enable verbose output
-    #[arg(long, global = true)]
-    pub verbose: bool,
-
     /// Override config file path
     #[arg(short, long, global = true, value_name = "FILE")]
     pub config: Option<String>,
@@ -548,15 +544,6 @@ mod tests {
         let cli = Cli::try_parse_from(["isod", "add", "ubuntu"]).unwrap();
         assert!(matches!(cli.command, Commands::Add { .. }));
         assert_eq!(cli.get_distro_name(), Some("ubuntu"));
-    }
-
-    #[test]
-    fn test_verbose_flag() {
-        let cli = Cli::try_parse_from(["isod", "-v", "list"]).unwrap();
-        assert!(cli.verbose);
-
-        let cli = Cli::try_parse_from(["isod", "--verbose", "list"]).unwrap();
-        assert!(cli.verbose);
     }
 
     #[test]

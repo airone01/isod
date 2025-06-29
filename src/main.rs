@@ -67,7 +67,6 @@ async fn main() -> Result<()> {
                 version,
                 all_variants,
                 all_archs,
-                args.verbose,
             )
             .await?;
         }
@@ -84,7 +83,6 @@ async fn main() -> Result<()> {
                 force,
                 check_only,
                 include_beta,
-                args.verbose,
             )
             .await?;
         }
@@ -101,7 +99,7 @@ async fn main() -> Result<()> {
                 installed,
                 versions,
                 distro,
-                long || args.verbose,
+                long,
             )
             .await?;
         }
@@ -136,12 +134,11 @@ async fn main() -> Result<()> {
                 auto,
                 verify,
                 download,
-                args.verbose,
             )
             .await?;
         }
         Commands::Config { action } => {
-            handlers::handle_config(&mut config_manager, action, args.verbose).await?;
+            handlers::handle_config(&mut config_manager, action).await?;
         }
         Commands::Clean {
             keep,
@@ -158,7 +155,6 @@ async fn main() -> Result<()> {
                 min_age,
                 distro,
                 cache,
-                args.verbose,
             )
             .await?;
         }
@@ -182,7 +178,6 @@ async fn main() -> Result<()> {
                 torrent,
                 max_concurrent,
                 verify,
-                args.verbose,
             )
             .await?;
         }
@@ -191,7 +186,7 @@ async fn main() -> Result<()> {
             detailed,
             limit,
         } => {
-            handlers::handle_search(&iso_registry, query, detailed, limit, args.verbose).await?;
+            handlers::handle_search(&iso_registry, query, detailed, limit).await?;
         }
         Commands::Info {
             distro,
@@ -199,15 +194,7 @@ async fn main() -> Result<()> {
             sources,
             details,
         } => {
-            handlers::handle_info(
-                &iso_registry,
-                distro,
-                versions,
-                sources,
-                details,
-                args.verbose,
-            )
-            .await?;
+            handlers::handle_info(&iso_registry, distro, versions, sources, details).await?;
         }
     }
 
@@ -265,15 +252,15 @@ mod tests {
         use clap::Parser;
 
         // Test distro name extraction
-        let cli = Cli::try_parse_from(&["isod", "add", "ubuntu"]).unwrap();
+        let cli = Cli::try_parse_from(["isod", "add", "ubuntu"]).unwrap();
         assert_eq!(cli.get_distro_name(), Some("ubuntu"));
 
         // Test USB requirement detection
-        let cli = Cli::try_parse_from(&["isod", "sync"]).unwrap();
+        let cli = Cli::try_parse_from(["isod", "sync"]).unwrap();
         assert!(cli.requires_usb());
 
         // Test config modification detection
-        let cli = Cli::try_parse_from(&["isod", "add", "fedora"]).unwrap();
+        let cli = Cli::try_parse_from(["isod", "add", "fedora"]).unwrap();
         assert!(cli.modifies_config());
     }
 

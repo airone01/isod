@@ -9,7 +9,6 @@ pub async fn handle_search(
     query: String,
     detailed: bool,
     limit: usize,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
     term.write_line(&format!(
@@ -50,7 +49,7 @@ pub async fn handle_search(
                 definition.display_name
             ))?;
 
-            if detailed || verbose {
+            if detailed {
                 term.write_line(&format!(
                     "   {} {}",
                     style("📝").dim(),
@@ -72,32 +71,30 @@ pub async fn handle_search(
                     definition.supported_variants
                 ))?;
 
-                if verbose {
-                    let spinner = ProgressBar::new_spinner();
-                    spinner.set_style(
-                        ProgressStyle::default_spinner()
-                            .template("   {spinner:.blue} Latest version: ")
-                            .unwrap(),
-                    );
-                    spinner.enable_steady_tick(Duration::from_millis(100));
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("   {spinner:.blue} Latest version: ")
+                        .unwrap(),
+                );
+                spinner.enable_steady_tick(Duration::from_millis(100));
 
-                    match iso_registry.get_latest_version(distro_name).await {
-                        Ok(version_info) => {
-                            spinner.finish_and_clear();
-                            term.write_line(&format!(
-                                "   {} Latest version: {} ({})",
-                                style("🔍").cyan(),
-                                style(&version_info.version).green(),
-                                version_info.release_type
-                            ))?;
-                        }
-                        Err(_) => {
-                            spinner.finish_and_clear();
-                            term.write_line(&format!(
-                                "   {} Latest version: Unable to fetch",
-                                style("❌").red()
-                            ))?;
-                        }
+                match iso_registry.get_latest_version(distro_name).await {
+                    Ok(version_info) => {
+                        spinner.finish_and_clear();
+                        term.write_line(&format!(
+                            "   {} Latest version: {} ({})",
+                            style("🔍").cyan(),
+                            style(&version_info.version).green(),
+                            version_info.release_type
+                        ))?;
+                    }
+                    Err(_) => {
+                        spinner.finish_and_clear();
+                        term.write_line(&format!(
+                            "   {} Latest version: Unable to fetch",
+                            style("❌").red()
+                        ))?;
                     }
                 }
             }

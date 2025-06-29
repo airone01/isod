@@ -5,14 +5,13 @@ use isod::usb::UsbManager;
 use std::process;
 
 pub async fn handle_clean(
-    config_manager: &ConfigManager,
+    _config_manager: &ConfigManager,
     usb_manager: &UsbManager,
     keep: u32,
     dry_run: bool,
     min_age: u32,
     filter_distro: Option<String>,
     clean_cache: bool,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
 

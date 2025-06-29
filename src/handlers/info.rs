@@ -11,7 +11,6 @@ pub async fn handle_info(
     show_versions: bool,
     show_sources: bool,
     show_details: bool,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
     term.write_line(&format!(
@@ -53,7 +52,7 @@ pub async fn handle_info(
         style(&definition.homepage).cyan()
     ))?;
 
-    if show_details || verbose {
+    if show_details {
         term.write_line(&format!(
             "\n{} Supported architectures:",
             style("🏗️").cyan()
@@ -82,7 +81,7 @@ pub async fn handle_info(
         ))?;
     }
 
-    if show_versions || verbose {
+    if show_versions {
         term.write_line(&format!(
             "\n{} Checking available versions...",
             style("🔍").cyan()
@@ -108,7 +107,7 @@ pub async fn handle_info(
                     sorted_versions.sort_by(|a, b| b.cmp(a));
 
                     for (i, version) in sorted_versions.iter().enumerate() {
-                        if !verbose && i >= 5 {
+                        if i >= 5 {
                             term.write_line(&format!(
                                 "   {} and {} more (use --verbose to see all)",
                                 style("...").dim(),
@@ -148,7 +147,7 @@ pub async fn handle_info(
         }
     }
 
-    if show_sources || verbose {
+    if show_sources {
         term.write_line(&format!("\n{} Download sources:", style("🌐").cyan()))?;
         for (i, source) in definition.download_sources.iter().enumerate() {
             term.write_line(&format!(

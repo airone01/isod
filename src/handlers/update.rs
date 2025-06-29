@@ -15,7 +15,6 @@ pub async fn handle_update(
     force: bool,
     check_only: bool,
     include_beta: bool,
-    verbose: bool,
 ) -> Result<()> {
     match distro {
         Some(d) => {
@@ -27,7 +26,6 @@ pub async fn handle_update(
                 force,
                 check_only,
                 include_beta,
-                verbose,
             )
             .await
         }
@@ -38,7 +36,6 @@ pub async fn handle_update(
                 force,
                 check_only,
                 include_beta,
-                verbose,
             )
             .await
         }
@@ -52,7 +49,6 @@ async fn update_single_distro(
     force: bool,
     check_only: bool,
     include_beta: bool,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
 
@@ -173,16 +169,14 @@ async fn update_single_distro(
                     {
                         Ok(info) => info,
                         Err(e) => {
-                            if verbose {
-                                term.write_line(&format!(
-                                    "{} Skipping {}-{}-{}: {}",
-                                    style("⚠️").yellow(),
-                                    distro,
-                                    arch,
-                                    variant,
-                                    e
-                                ))?;
-                            }
+                            term.write_line(&format!(
+                                "{} Skipping {}-{}-{}: {}",
+                                style("⚠️").yellow(),
+                                distro,
+                                arch,
+                                variant,
+                                e
+                            ))?;
                             continue;
                         }
                     };
@@ -301,7 +295,6 @@ async fn update_all_distros(
     force: bool,
     check_only: bool,
     include_beta: bool,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
 
@@ -342,7 +335,6 @@ async fn update_all_distros(
             force,
             check_only,
             include_beta,
-            verbose,
         )
         .await
         {

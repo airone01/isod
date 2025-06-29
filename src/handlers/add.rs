@@ -10,10 +10,9 @@ pub async fn handle_add(
     distro: String,
     variant: Option<String>,
     arch: Option<String>,
-    version: Option<String>,
+    _version: Option<String>,
     all_variants: bool,
     all_archs: bool,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
 
@@ -95,13 +94,11 @@ pub async fn handle_add(
             if !distro_config.variants.contains(v) {
                 distro_config.variants.push(v.clone());
                 changes_made = true;
-                if verbose {
-                    term.write_line(&format!(
-                        "{} Added variant: {}",
-                        style("📦").green(),
-                        style(v).cyan()
-                    ))?;
-                }
+                term.write_line(&format!(
+                    "{} Added variant: {}",
+                    style("📦").green(),
+                    style(v).cyan()
+                ))?;
             }
         }
     } else if let Some(v) = variant {
@@ -132,13 +129,11 @@ pub async fn handle_add(
             if !distro_config.architectures.contains(a) {
                 distro_config.architectures.push(a.clone());
                 changes_made = true;
-                if verbose {
-                    term.write_line(&format!(
-                        "{} Added architecture: {}",
-                        style("🏗️").green(),
-                        style(a).cyan()
-                    ))?;
-                }
+                term.write_line(&format!(
+                    "{} Added architecture: {}",
+                    style("🏗️").green(),
+                    style(a).cyan()
+                ))?;
             }
         }
     } else if let Some(a) = arch {
@@ -209,37 +204,33 @@ pub async fn handle_add(
     ))?;
 
     // Try to show version info
-    if verbose {
-        term.write_line("")?;
-        term.write_line(&format!(
-            "{} Checking latest version...",
-            style("🔍").cyan()
-        ))?;
-        match iso_registry.get_latest_version(&distro).await {
-            Ok(version_info) => {
-                term.write_line(&format!(
-                    "   {}: {}",
-                    style("Latest version").dim(),
-                    style(&version_info.version).green()
-                ))?;
-                term.write_line(&format!(
-                    "   {}: {}",
-                    style("Release type").dim(),
-                    version_info.release_type
-                ))?;
-                if let Some(date) = version_info.release_date {
-                    term.write_line(&format!("   {}: {}", style("Release date").dim(), date))?;
-                }
+    term.write_line("")?;
+    term.write_line(&format!(
+        "{} Checking latest version...",
+        style("🔍").cyan()
+    ))?;
+    match iso_registry.get_latest_version(&distro).await {
+        Ok(version_info) => {
+            term.write_line(&format!(
+                "   {}: {}",
+                style("Latest version").dim(),
+                style(&version_info.version).green()
+            ))?;
+            term.write_line(&format!(
+                "   {}: {}",
+                style("Release type").dim(),
+                version_info.release_type
+            ))?;
+            if let Some(date) = version_info.release_date {
+                term.write_line(&format!("   {}: {}", style("Release date").dim(), date))?;
             }
-            Err(e) => {
-                if verbose {
-                    term.write_line(&format!(
-                        "{} Could not fetch version info: {}",
-                        style("⚠️").yellow(),
-                        e
-                    ))?;
-                }
-            }
+        }
+        Err(e) => {
+            term.write_line(&format!(
+                "{} Could not fetch version info: {}",
+                style("⚠️").yellow(),
+                e
+            ))?;
         }
     }
 

@@ -6,13 +6,12 @@ use isod::usb::UsbManager;
 use std::process;
 
 pub async fn handle_sync(
-    config_manager: &ConfigManager,
+    _config_manager: &ConfigManager,
     usb_manager: &mut UsbManager,
-    mount_point: Option<String>,
+    _mount_point: Option<String>,
     auto_select: bool,
     verify_checksums: bool,
     download_missing: bool,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
     term.write_line(&format!(
@@ -89,13 +88,11 @@ pub async fn handle_sync(
 
     // Create metadata directory
     let metadata_dir = usb_manager.create_isod_metadata_dir().await?;
-    if verbose {
-        term.write_line(&format!(
-            "{} Metadata directory: {:?}",
-            style("📁").cyan(),
-            metadata_dir
-        ))?;
-    }
+    term.write_line(&format!(
+        "{} Metadata directory: {:?}",
+        style("📁").cyan(),
+        metadata_dir
+    ))?;
 
     // Show space info
     let available_space = usb_manager.get_available_space().await?;

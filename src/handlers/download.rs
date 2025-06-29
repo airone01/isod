@@ -16,7 +16,6 @@ pub async fn handle_download(
     prefer_torrent: bool,
     max_concurrent: u8,
     verify_checksum: bool,
-    verbose: bool,
 ) -> Result<()> {
     let term = Term::stdout();
     term.write_line(&format!(
@@ -132,7 +131,7 @@ pub async fn handle_download(
         if let Ok(Some(checksum)) = iso_registry.get_checksum(&iso_info).await {
             iso_info.checksum = Some(checksum);
             iso_info.checksum_type = Some("sha256".to_string());
-        } else if verbose {
+        } else {
             term.write_line(&format!(
                 "{} No checksum available for verification",
                 style("⚠️").yellow()
@@ -164,14 +163,12 @@ pub async fn handle_download(
     let mut download_completed = false;
     while let Some(progress) = progress_receiver.recv().await {
         match progress {
-            DownloadProgress::Started { url, .. } => {
-                if verbose {
-                    term.write_line(&format!(
-                        "{} Started download from: {}",
-                        style("🔗").cyan(),
-                        style(&url).dim()
-                    ))?;
-                }
+            DownloadProgress::Started { id: _, url, .. } => {
+                term.write_line(&format!(
+                    "{} Started download from: {}",
+                    style("🔗").cyan(),
+                    style(&url).dim()
+                ))?;
                 progress_bar.set_message(format!("Downloading {}", iso_info.filename));
             }
             DownloadProgress::Progress {

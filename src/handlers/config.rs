@@ -5,15 +5,11 @@ use dialoguer::Confirm;
 use isod::config::ConfigManager;
 use std::process;
 
-pub async fn handle_config(
-    config_manager: &mut ConfigManager,
-    action: ConfigAction,
-    verbose: bool,
-) -> Result<()> {
+pub async fn handle_config(config_manager: &mut ConfigManager, action: ConfigAction) -> Result<()> {
     let term = Term::stdout();
 
     match action {
-        ConfigAction::Show { section, format } => {
+        ConfigAction::Show { section, format: _ } => {
             let config_content = std::fs::read_to_string(config_manager.config_file())?;
 
             match section.as_deref() {
@@ -195,7 +191,7 @@ pub async fn handle_config(
 
             if !yes {
                 let confirmed = Confirm::new()
-                    .with_prompt(&format!(
+                    .with_prompt(format!(
                         "Are you sure you want to reset {}?",
                         style(target).cyan()
                     ))
